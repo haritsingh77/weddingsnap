@@ -1,0 +1,30 @@
+# Python
+backend/venv/
+backend/__pycache__/
+backend/app/__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Environment
+.env
+*.env
+
+# Face encodings cache (large file, don't commit)
+*.pkl
+*.npy
+encodings/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Google credentials
+credentials.json
+token.json
+service_account.jsonbackend/service-account.json
+backend/.env
