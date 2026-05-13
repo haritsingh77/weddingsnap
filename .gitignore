@@ -26,5 +26,6 @@ Thumbs.db
 # Google credentials
 credentials.json
 token.json
-service_account.jsonbackend/service-account.json
+service_account.json
+backend/service-account.json
 backend/.env
