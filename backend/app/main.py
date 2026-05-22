@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.services.drive_service import get_folder_structure
 
 app = FastAPI(title="WeddingSnap API", version="1.0.0")
 

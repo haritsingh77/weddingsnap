@@ -1,0 +1,22 @@
+2026-05-13 22:03:31,603 [INFO] Input  : /Volumes/Mahima/Mahima & Saurav Wedding
+2026-05-13 22:03:31,603 [INFO] Output : /Users/haritsingh/Developer/weddingsnap/backend/encodings
+2026-05-13 22:03:31,603 [INFO] Resume : False
+2026-05-13 22:03:46,011 [INFO] Found 9,918 photos in /Volumes/Mahima/Mahima & Saurav Wedding
+2026-05-14 04:21:45,554 [WARNING] Skipped ._JKP_1578.JPG: cannot identify image file '/Volumes/Mahima/Mahima & Saurav Wedding/PHOTOS/ZR/._JKP_1578.JPG'
+2026-05-14 04:21:45,586 [WARNING] Skipped ._JKP_1581.JPG: cannot identify image file '/Volumes/Mahima/Mahima & Saurav Wedding/PHOTOS/ZR/._JKP_1581.JPG'
+2026-05-14 04:21:45,595 [WARNING] Skipped ._JKP_1593.JPG: cannot identify image file '/Volumes/Mahima/Mahima & Saurav Wedding/PHOTOS/ZR/._JKP_1593.JPG'
+2026-05-14 04:21:45,596 [WARNING] Skipped ._JKP_1682.JPG: cannot identify image file '/Volumes/Mahima/Mahima & Saurav Wedding/PHOTOS/ZR/._JKP_1682.JPG'
+2026-05-14 04:21:45,597 [WARNING] Skipped ._JKP_1692.JPG: cannot identify image file '/Volumes/Mahima/Mahima & Saurav Wedding/PHOTOS/ZR/._JKP_1692.JPG'
+2026-05-14 04:21:45,600 [WARNING] Skipped ._JKP_1697.JPG: cannot identify image file '/Volumes/Mahima/Mahima & Saurav Wedding/PHOTOS/ZR/._JKP_1697.JPG'
+2026-05-14 04:21:45,603 [WARNING] Skipped ._JKP_1729.JPG: cannot identify image file '/Volumes/Mahima/Mahima & Saurav Wedding/PHOTOS/ZR/._JKP_1729.JPG'
+2026-05-14 04:21:45,613 [WARNING] Skipped ._JKP_1768.JPG: cannot identify image file '/Volumes/Mahima/Mahima & Saurav Wedding/PHOTOS/ZR/._JKP_1768.JPG'
+2026-05-14 04:21:45,620 [WARNING] Skipped ._JKP_2177.JPG: cannot identify image file '/Volumes/Mahima/Mahima & Saurav Wedding/PHOTOS/ZR/._JKP_2177.JPG'
+2026-05-14 04:31:51,725 [WARNING] Skipped 9M3A9970.JPG: cannot identify image file '/Volumes/Mahima/Mahima & Saurav Wedding/VIDEOS/R 6 II TRADITIONAL/01/01/9M3A9970.JPG'
+2026-05-14 04:36:54,541 [WARNING] Skipped 9M3A0401.JPG: cannot identify image file '/Volumes/Mahima/Mahima & Saurav Wedding/VIDEOS/R 6 II TRADITIONAL/01/02/9M3A0401.JPG'
+2026-05-14 04:40:03,802 [INFO] ========================================
+2026-05-14 04:40:03,803 [INFO] ✅ Done!
+2026-05-14 04:40:03,803 [INFO]    Photos scanned : 9,918
+2026-05-14 04:40:03,804 [INFO]    Faces found    : 21,107
+2026-05-14 04:40:03,805 [INFO]    Common photos  : 1,801
+2026-05-14 04:40:03,805 [INFO]    No face / skip : 1,494
+2026-05-14 04:40:03,805 [INFO]    Saved to       : /Users/haritsingh/Developer/weddingsnap/backend/encodings/face_encodings.pkl
