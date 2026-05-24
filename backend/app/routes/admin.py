@@ -90,6 +90,13 @@ async def create_guest(
                 from app.services.drive_cache import save_cached_file
                 save_cached_file(f"selfie_{guest_id}.jpg", selfie_bytes)
 
+                # Auto-name cluster
+                try:
+                    from app.routes.faces import auto_name_cluster_for_guest
+                    auto_name_cluster_for_guest(name.strip(), selfie_bytes)
+                except Exception as auto_name_err:
+                    log.warning(f"Could not auto-name cluster on create: {auto_name_err}")
+
                 # Run matching
                 match_result = match_guest_selfie(selfie_bytes)
                 if match_result.get("success", True):
@@ -210,6 +217,15 @@ def run_guest_matching(guest_id: str, x_admin_password: str = Header(..., alias=
     match_result = match_guest_selfie(selfie_data)
     if not match_result.get("success", True):
         raise HTTPException(status_code=422, detail=match_result.get("message", "No face detected in reference photo."))
+
+    # Auto-name cluster
+    try:
+        guest = supabase.table("guests").select("name").eq("id", guest_id).execute()
+        if guest.data:
+            from app.routes.faces import auto_name_cluster_for_guest
+            auto_name_cluster_for_guest(guest.data[0]["name"], selfie_data)
+    except Exception as auto_name_err:
+        log.warning(f"Could not auto-name cluster on re-match: {auto_name_err}")
 
     # Resolve Drive IDs
     personal_ids = resolve_drive_ids(match_result["personal_photos"])

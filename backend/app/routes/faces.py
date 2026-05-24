@@ -43,6 +43,9 @@ async def register_face(
         if not match_result["success"]:
             raise HTTPException(status_code=422, detail=match_result["message"])
 
+        # Auto-name corresponding cluster in Recognized Faces panel
+        auto_name_cluster_for_guest(guest.data[0]["name"], image_bytes)
+
         # Resolve local file paths → Drive file IDs
         personal_ids = resolve_drive_ids(match_result["personal_photos"])
         common_ids = resolve_drive_ids(match_result["common_photos"])
@@ -480,3 +483,96 @@ def get_cluster_thumbnail(cluster_id: str):
         raise HTTPException(
             status_code=500, detail=f"Failed to generate face thumbnail: {e}"
         )
+
+
+def auto_name_cluster_for_guest(guest_name: str, selfie_bytes: bytes):
+    """
+    Find which face cluster matches the guest's selfie, and name that cluster in cluster_names.json.
+    """
+    try:
+        from app.services.face_service import encode_selfie, load_encodings, get_filename_map
+        import numpy as np
+        from sklearn.cluster import AgglomerativeClustering
+        from pathlib import Path
+        from app.services.drive_cache import get_cached_json, save_cached_json
+        from app.config import settings
+
+        guest_enc = encode_selfie(selfie_bytes)
+        if guest_enc is None:
+            return
+
+        all_records = load_encodings()
+        X = []
+        origins = []
+        for record in all_records:
+            encs = record.get("encodings", [])
+            locs = record.get("locations", [])
+            frames = record.get("frame_indices", [None] * len(encs))
+            for enc, loc, frame in zip(encs, locs, frames):
+                X.append(enc)
+                origins.append({
+                    "path": record["path"],
+                    "location": loc,
+                    "frame_idx": frame,
+                    "is_video": record["path"].lower().endswith((".mp4", ".mov", ".avi", ".mkv", ".webm")),
+                })
+
+        if not X:
+            return
+
+        # Compare selfie encoding against all faces
+        distances = np.linalg.norm(np.array(X) - guest_enc, axis=1)
+        matching_indices = np.where(distances <= settings.FACE_MATCH_TOLERANCE)[0]
+        if len(matching_indices) == 0:
+            return
+
+        # Run Agglomerative clustering to get the exact labels/clusters
+        agg = AgglomerativeClustering(
+            distance_threshold=settings.FACE_MATCH_TOLERANCE,
+            n_clusters=None,
+            linkage="complete",
+            metric="euclidean",
+        ).fit(np.array(X))
+        labels = agg.labels_
+
+        # Find the most frequent cluster label among matches
+        matched_labels = [labels[idx] for idx in matching_indices if labels[idx] != -1]
+        if not matched_labels:
+            return
+
+        from collections import Counter
+        best_label = str(Counter(matched_labels).most_common(1)[0][0])
+
+        # Find the representative face for this label (just like in get_face_clusters)
+        label_members = []
+        for idx, label in enumerate(labels):
+            if str(label) == best_label:
+                label_members.append(origins[idx])
+
+        if not label_members:
+            return
+
+        rep = None
+        for member in label_members:
+            if not member["is_video"]:
+                rep = member
+                break
+        if not rep:
+            rep = label_members[0]
+
+        # Get stable key for representative face
+        filename = Path(rep["path"]).name
+        mapping = get_filename_map()
+        drive_id = mapping.get(filename, "")
+        loc = rep["location"]
+        rep_key = f"{drive_id}_{loc[0]}_{loc[1]}_{loc[2]}_{loc[3]}"
+
+        # Save to cluster_names.json
+        names_data = get_cached_json("cluster_names.json") or {}
+        names_data[rep_key] = guest_name.strip()
+        names_data[best_label] = guest_name.strip()  # fallback compat
+        save_cached_json("cluster_names.json", names_data)
+        log.info(f"Auto-named face cluster {best_label} to '{guest_name}' based on selfie matching")
+
+    except Exception as e:
+        log.warning(f"Could not auto-name face cluster: {e}")
