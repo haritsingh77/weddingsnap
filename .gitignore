@@ -26,6 +26,17 @@ Thumbs.db
 # Google credentials
 credentials.json
 token.json
-service_account.json
 backend/service-account.json
 backend/.env
+
+# Local Cache & Temp Directories
+cache/
+temp_preprocess/
+backend/cache/
+backend/encodings/
+backend/temp_preprocess/
+
+# Log files
+*.log
+backend/*.log
+

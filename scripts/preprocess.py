@@ -34,12 +34,16 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
+import cv2
+
 # ── Constants ─────────────────────────────────────────────────────────────────
-SUPPORTED_EXTENSIONS  = {".jpg", ".jpeg", ".png", ".heic", ".webp"}
-GROUP_PHOTO_THRESHOLD = 4      # 4+ faces → common photo
-MAX_IMAGE_SIZE        = 1200   # px — resize before processing for speed
-DBSCAN_EPS            = 0.5    # face similarity tolerance
-DBSCAN_MIN_SAMPLES    = 2      # min photos to form a person cluster
+SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".heic", ".webp"}
+SUPPORTED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
+SUPPORTED_EXTENSIONS       = SUPPORTED_IMAGE_EXTENSIONS | SUPPORTED_VIDEO_EXTENSIONS
+GROUP_PHOTO_THRESHOLD      = 4      # 4+ faces → common photo
+MAX_IMAGE_SIZE             = 1200   # px — resize before processing for speed
+DBSCAN_EPS                 = 0.5    # face similarity tolerance
+DBSCAN_MIN_SAMPLES         = 2      # min photos to form a person cluster
 
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
@@ -50,7 +54,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--input", "-i",
         type=str,
-        help="Path to folder containing wedding photos",
+        help="Path to folder containing wedding photos and videos",
     )
     parser.add_argument(
         "--output", "-o",
@@ -71,7 +75,7 @@ def prompt_for_folder() -> Path:
     """Interactive fallback if --input not provided."""
     print("\n📁 WeddingSnap Preprocessor")
     print("=" * 40)
-    print("Drag and drop your photos folder into this terminal window,")
+    print("Drag and drop your photos/videos folder into this terminal window,")
     print("or type the full path manually.\n")
 
     while True:
@@ -90,7 +94,7 @@ def prompt_for_folder() -> Path:
             1 for f in path.rglob("*")
             if f.suffix.lower() in SUPPORTED_EXTENSIONS
         )
-        print(f"\n  ✅ Found {photo_count:,} photos in: {path}")
+        print(f"\n  ✅ Found {photo_count:,} media files in: {path}")
         confirm = input("  Proceed with this folder? (y/n): ").strip().lower()
         if confirm == "y":
             return path
@@ -142,10 +146,90 @@ def encode_photo(path: Path) -> Optional[dict]:
 
     return {
         "path": str(path),
+        "locations": locations,       # one per face found (top, right, bottom, left)
         "encodings": encodings,       # one per face found
         "face_count": face_count,
         "is_common": is_common,
     }
+
+
+def encode_video(path: Path) -> Optional[dict]:
+    """Extract face encodings from a video by sampling frames."""
+    try:
+        cap = cv2.VideoCapture(str(path))
+        if not cap.isOpened():
+            log.warning(f"Could not open video file: {path.name}")
+            return None
+
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if fps <= 0 or total_frames <= 0:
+            cap.release()
+            return None
+
+        # Sample 1 frame per second of video
+        sample_interval = max(1, int(fps))
+        unique_samples = []  # List of tuples: (location, encoding, frame_idx)
+        max_faces_in_frame = 0
+
+        frame_idx = 0
+        while True:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            # Convert BGR (OpenCV) to RGB
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            
+            # Resize for speed
+            h, w = rgb_frame.shape[:2]
+            if max(h, w) > MAX_IMAGE_SIZE:
+                scale = MAX_IMAGE_SIZE / max(h, w)
+                rgb_frame = cv2.resize(rgb_frame, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+
+            # Detect faces in frame
+            locations = face_recognition.face_locations(rgb_frame, model="hog")
+            if locations:
+                max_faces_in_frame = max(max_faces_in_frame, len(locations))
+                encodings = face_recognition.face_encodings(rgb_frame, locations)
+                for loc, enc in zip(locations, encodings):
+                    # Avoid adding duplicate encodings of the same person
+                    if not unique_samples:
+                        unique_samples.append((loc, enc, frame_idx))
+                    else:
+                        existing_encs = [s[1] for s in unique_samples]
+                        distances = face_recognition.face_distance(existing_encs, enc)
+                        if not any(d < 0.5 for d in distances):
+                            unique_samples.append((loc, enc, frame_idx))
+
+            frame_idx += sample_interval
+            if frame_idx >= total_frames:
+                break
+
+        cap.release()
+
+        if not unique_samples:
+            return None
+
+        common_keywords = {"venue", "decor", "ceremony", "stage", "mandap", "common"}
+        is_common = (
+            max_faces_in_frame >= GROUP_PHOTO_THRESHOLD or
+            any(kw in path.parent.name.lower() for kw in common_keywords)
+        )
+
+        return {
+            "path": str(path),
+            "locations": [s[0] for s in unique_samples],
+            "encodings": [s[1] for s in unique_samples],
+            "frame_indices": [s[2] for s in unique_samples],
+            "face_count": max_faces_in_frame,
+            "is_common": is_common,
+        }
+
+    except Exception as e:
+        log.error(f"Failed to encode video {path.name}: {e}")
+        return None
 
 
 # ── Main pipeline ─────────────────────────────────────────────────────────────
@@ -162,7 +246,7 @@ def run(input_folder: Path, output_folder: Path, resume: bool):
         log.info(f"Resuming — {len(processed):,} files already done")
 
     photos = get_all_photos(input_folder)
-    log.info(f"Found {len(photos):,} photos in {input_folder}")
+    log.info(f"Found {len(photos):,} media files in {input_folder}")
 
     # Load existing encodings if resuming
     all_results = []
@@ -174,12 +258,16 @@ def run(input_folder: Path, output_folder: Path, resume: bool):
     skipped = failed = 0
 
     with open(progress_log, "a") as log_file:
-        for photo in tqdm(photos, desc="Scanning photos", unit="photo"):
-            if str(photo) in processed:
+        for media_file in tqdm(photos, desc="Scanning media files", unit="file"):
+            if str(media_file) in processed:
                 skipped += 1
                 continue
 
-            result = encode_photo(photo)
+            suffix = media_file.suffix.lower()
+            if suffix in SUPPORTED_VIDEO_EXTENSIONS:
+                result = encode_video(media_file)
+            else:
+                result = encode_photo(media_file)
 
             if result:
                 all_results.append(result)
@@ -187,7 +275,7 @@ def run(input_folder: Path, output_folder: Path, resume: bool):
                 failed += 1
 
             # Mark as processed
-            log_file.write(str(photo) + "\n")
+            log_file.write(str(media_file) + "\n")
 
             # Save checkpoint every 500 photos
             if len(all_results) % 500 == 0:

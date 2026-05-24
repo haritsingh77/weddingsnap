@@ -15,9 +15,16 @@ class Config:
     SUPABASE_KEY = os.getenv("SUPABASE_KEY")
     
     GOOGLE_DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
+    GOOGLE_DRIVE_CACHE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_CACHE_FOLDER_ID")
+    GOOGLE_DRIVE_THUMBNAILS_FOLDER_ID = os.getenv("GOOGLE_DRIVE_THUMBNAILS_FOLDER_ID")
+    GOOGLE_DRIVE_ENCODINGS_FOLDER_ID = os.getenv("GOOGLE_DRIVE_ENCODINGS_FOLDER_ID")
+    GOOGLE_DRIVE_TEMP_DELETE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_TEMP_DELETE_FOLDER_ID")
     GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "service-account.json")
     
     FACE_MATCH_TOLERANCE = float(os.getenv("FACE_MATCH_TOLERANCE", "0.5"))
-    ENCODINGS_CACHE_PATH = os.getenv("ENCODINGS_CACHE_PATH", "./encodings/face_encodings.pkl")
+    ENCODINGS_CACHE_PATH = os.getenv(
+        "ENCODINGS_CACHE_PATH",
+        str(Path(__file__).resolve().parent.parent / "encodings" / "face_encodings.pkl")
+    )
 
 settings = Config()
