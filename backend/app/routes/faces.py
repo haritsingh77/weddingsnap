@@ -334,52 +334,73 @@ def get_cluster_thumbnail(cluster_id: str):
     drive_id = mapping[filename]
 
     try:
-        service = get_drive_service()
-        if is_video:
-            # Use /tmp for temp video file (works on hosted servers)
-            temp_video = Path(f"/tmp/weddingsnap_cache/temp_thumb_{cluster_id}.tmp")
-            temp_video.parent.mkdir(parents=True, exist_ok=True)
+        # Try to load size-400 thumbnail from cache first to avoid heavy download
+        thumb_key = f"thumb_{drive_id}_400.jpg"
+        thumb_data = get_cached_file(thumb_key)
+        
+        img = None
+        if thumb_data:
+            try:
+                img = Image.open(io.BytesIO(thumb_data)).convert("RGB")
+                # HOG detector ran on 1200px max image size. Scale coordinates dynamically.
+                # E.g., if thumbnail max dimension is 400, scale factor is 400 / 1200 = 1/3
+                w, h = img.size
+                scale = max(w, h) / 1200.0
+                top, right, bottom, left = [int(c * scale) for c in location]
+            except Exception as thumb_err:
+                log.warning(f"Could not crop from size-400 thumbnail: {thumb_err}")
+                img = None
 
-            request = service.files().get_media(fileId=drive_id)
-            with open(temp_video, "wb") as f:
-                downloader = MediaIoBaseDownload(f, request, chunksize=1024 * 1024 * 5)
+        if img is None:
+            # Fall back to downloading the full file from Google Drive if thumbnail is missing or crop failed
+            service = get_drive_service()
+            if is_video:
+                # Use /tmp for temp video file (works on hosted servers)
+                temp_video = Path(f"/tmp/weddingsnap_cache/temp_thumb_{cluster_id}.tmp")
+                temp_video.parent.mkdir(parents=True, exist_ok=True)
+
+                request = service.files().get_media(fileId=drive_id)
+                with open(temp_video, "wb") as f:
+                    downloader = MediaIoBaseDownload(f, request, chunksize=1024 * 1024 * 5)
+                    done = False
+                    while not done:
+                        _, done = downloader.next_chunk()
+
+                cap = cv2.VideoCapture(str(temp_video))
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx or 0)
+                ret, frame = cap.read()
+                cap.release()
+
+                if temp_video.exists():
+                    temp_video.unlink()
+
+                if not ret:
+                    raise Exception("Could not decode video frame")
+
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                img = Image.fromarray(rgb_frame)
+            else:
+                request = service.files().get_media(fileId=drive_id)
+                img_bytes = io.BytesIO()
+                downloader = MediaIoBaseDownload(img_bytes, request, chunksize=1024 * 1024 * 2)
                 done = False
                 while not done:
                     _, done = downloader.next_chunk()
+                img_bytes.seek(0)
+                img = Image.open(img_bytes).convert("RGB")
 
-            cap = cv2.VideoCapture(str(temp_video))
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx or 0)
-            ret, frame = cap.read()
-            cap.release()
+            if not is_video:
+                img = ImageOps.exif_transpose(img)
 
-            if temp_video.exists():
-                temp_video.unlink()
+            w, h = img.size
+            if max(w, h) > 1200:
+                scale = 1200 / max(w, h)
+                img = img.resize((int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
+                w, h = img.size
 
-            if not ret:
-                raise Exception("Could not decode video frame")
-
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            img = Image.fromarray(rgb_frame)
-        else:
-            request = service.files().get_media(fileId=drive_id)
-            img_bytes = io.BytesIO()
-            downloader = MediaIoBaseDownload(img_bytes, request, chunksize=1024 * 1024 * 2)
-            done = False
-            while not done:
-                _, done = downloader.next_chunk()
-            img_bytes.seek(0)
-            img = Image.open(img_bytes).convert("RGB")
-
-        if not is_video:
-            img = ImageOps.exif_transpose(img)
+            top, right, bottom, left = location
 
         w, h = img.size
-        if max(w, h) > 1200:
-            scale = 1200 / max(w, h)
-            img = img.resize((int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
-            w, h = img.size
-
-        top, right, bottom, left = location
         fh = bottom - top
         fw = right - left
         pad_y = int(fh * 0.45)
