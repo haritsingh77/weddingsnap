@@ -332,9 +332,14 @@ def delete_guest(guest_id: str, x_admin_password: str = Header(..., alias="x-adm
 
 
 @router.get("/guests/{guest_id}/selfie")
-def get_guest_selfie(guest_id: str, x_admin_password: str = Header(..., alias="x-admin-password")):
+def get_guest_selfie(
+    guest_id: str,
+    x_admin_password: str = Header(None, alias="x-admin-password"),
+    password: str = None
+):
     """Get the reference selfie image for a guest."""
-    if x_admin_password != settings.ADMIN_PASSWORD:
+    token = x_admin_password or password
+    if token != settings.ADMIN_PASSWORD:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     from app.services.drive_cache import get_cached_file
