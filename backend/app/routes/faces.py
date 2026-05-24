@@ -377,19 +377,17 @@ def get_cluster_photos(cluster_id: str):
 
         photos_list = []
         for photo in res.data:
-            # Exclude common photos for guest view just like in personal album
-            if photo.get("is_common", False):
-                continue
             drive_id = photo.get("drive_path")
             if not drive_id:
                 continue
 
             mime_type = mime_map.get(drive_id, "image/jpeg")
             is_video = mime_type.startswith("video/")
+            is_common = photo.get("is_common", False)
 
             photos_list.append({
                 "drive_id": drive_id,
-                "is_common": False,
+                "is_common": is_common,
                 "thumb_url": f"/photos/thumb/{drive_id}",
                 "stream_url": f"/photos/stream/{drive_id}",
                 "is_video": is_video,

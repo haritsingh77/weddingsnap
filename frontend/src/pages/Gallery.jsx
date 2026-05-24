@@ -54,11 +54,16 @@ export default function Gallery() {
             setPage(p)
         } catch (err) {
             console.error('Failed to fetch photos:', err)
-            setError('Could not load gallery photos. Please check your connection.')
+            if (err.response?.status === 404) {
+                localStorage.clear()
+                navigate('/')
+            } else {
+                setError('Could not load gallery photos. Please check your connection.')
+            }
         } finally {
             setLoading(false)
         }
-    }, [guestId])
+    }, [guestId, navigate])
 
     useEffect(() => {
         if (!guestId) {
