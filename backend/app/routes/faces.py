@@ -16,6 +16,7 @@ router = APIRouter(prefix="/faces", tags=["faces"])
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
+
 @router.post("/register")
 async def register_face(
     guest_id: str = Form(...),
@@ -44,7 +45,7 @@ async def register_face(
 
         # Resolve local file paths → Drive file IDs
         personal_ids = resolve_drive_ids(match_result["personal_photos"])
-        common_ids   = resolve_drive_ids(match_result["common_photos"])
+        common_ids = resolve_drive_ids(match_result["common_photos"])
 
         # ── Deduplicate before upsert ─────────────────────────────────────────
         # A photo can appear in both personal_ids and common_ids.
@@ -74,10 +75,11 @@ async def register_face(
 
         photo_rows: list[dict] = []
         if photos_to_upsert:
-            upserted = supabase.table("photos").upsert(
-                photos_to_upsert,
-                on_conflict="drive_path"
-            ).execute()
+            upserted = (
+                supabase.table("photos")
+                .upsert(photos_to_upsert, on_conflict="drive_path")
+                .execute()
+            )
 
             if upserted.data:
                 drive_to_id = {p["drive_path"]: p["id"] for p in upserted.data}
@@ -92,14 +94,15 @@ async def register_face(
 
                 if photo_rows:
                     supabase.table("guest_photos").upsert(
-                        photo_rows,
-                        on_conflict="guest_id,photo_id"
+                        photo_rows, on_conflict="guest_id,photo_id"
                     ).execute()
 
         # Update guest last_login
-        supabase.table("guests").update({
-            "last_login": datetime.utcnow().isoformat(),
-        }).eq("id", guest_id).execute()
+        supabase.table("guests").update(
+            {
+                "last_login": datetime.utcnow().isoformat(),
+            }
+        ).eq("id", guest_id).execute()
 
         log.info(
             f"Guest {guest_id} matched: "
@@ -111,11 +114,12 @@ async def register_face(
             "personal_count": len(personal_ids),
             "common_count": len(common_ids),
             "total": len(personal_ids) + len(common_ids),
-            "message": f"Found {len(personal_ids)} photos of you and {len(common_ids)} group photos!"
+            "message": f"Found {len(personal_ids)} photos of you and {len(common_ids)} group photos!",
         }
 
     except Exception as e:
         import traceback
+
         tb = traceback.format_exc()
         log.error(f"Error in register_face:\n{tb}")
         try:
@@ -125,10 +129,7 @@ async def register_face(
             pass
         if isinstance(e, HTTPException):
             raise e
-        raise HTTPException(
-            status_code=500,
-            detail=f"Internal Server Error: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
 
 
 # ── Face Clustering & Recognized Faces (Google Photos style) ─────────────────
@@ -148,6 +149,7 @@ from app.config import settings
 
 CACHE_THUMB_DIR = Path("cache/thumbnails")
 
+
 def get_face_clusters() -> dict:
     """
     Cluster all precomputed face encodings in face_encodings.pkl using Agglomerative Clustering (complete linkage) to prevent the chaining effect.
@@ -166,15 +168,19 @@ def get_face_clusters() -> dict:
         encs = record.get("encodings", [])
         locs = record.get("locations", [])
         frames = record.get("frame_indices", [None] * len(encs))
-        
+
         for face_idx, (enc, loc, frame) in enumerate(zip(encs, locs, frames)):
             X.append(enc)
-            origins.append({
-                "path": record["path"],
-                "location": loc,
-                "frame_idx": frame,
-                "is_video": record["path"].lower().endswith(('.mp4', '.mov', '.avi', '.mkv', '.webm'))
-            })
+            origins.append(
+                {
+                    "path": record["path"],
+                    "location": loc,
+                    "frame_idx": frame,
+                    "is_video": record["path"]
+                    .lower()
+                    .endswith((".mp4", ".mov", ".avi", ".mkv", ".webm")),
+                }
+            )
 
     if not X:
         return {}
@@ -185,7 +191,7 @@ def get_face_clusters() -> dict:
         distance_threshold=settings.FACE_MATCH_TOLERANCE,
         n_clusters=None,
         linkage="complete",
-        metric="euclidean"
+        metric="euclidean",
     ).fit(X)
     labels = agg.labels_
 
@@ -193,16 +199,13 @@ def get_face_clusters() -> dict:
     for idx, label in enumerate(labels):
         if label == -1:
             continue  # ignore noise
-        
+
         label_str = str(label)
         origin = origins[idx]
-        
+
         if label_str not in clusters:
-            clusters[label_str] = {
-                "members": [],
-                "photos": set()
-            }
-        
+            clusters[label_str] = {"members": [], "photos": set()}
+
         clusters[label_str]["members"].append(origin)
         clusters[label_str]["photos"].add(origin["path"])
 
@@ -220,7 +223,7 @@ def get_face_clusters() -> dict:
         result[label_str] = {
             "representative": rep,
             "photos": sorted(list(data["photos"])),
-            "count": len(data["photos"])
+            "count": len(data["photos"]),
         }
 
     # Sort clusters descending by how many photos the person appears in
@@ -228,6 +231,7 @@ def get_face_clusters() -> dict:
 
 
 from pydantic import BaseModel
+
 
 class RenameClusterRequest(BaseModel):
     name: str
@@ -237,18 +241,28 @@ class RenameClusterRequest(BaseModel):
 def get_clusters():
     """Get list of recognized face clusters with counts, names, and thumbnail links."""
     from app.services.drive_cache import get_cached_json
+
     clusters = get_face_clusters()
     names_data = get_cached_json("cluster_names.json") or {}
+    mapping = get_filename_map()
 
     ui_clusters = []
     for cid, cdata in clusters.items():
-        name = names_data.get(cid, f"Person #{cid}")
-        ui_clusters.append({
-            "id": cid,
-            "name": name,
-            "count": cdata["count"],
-            "thumbnail_url": f"/faces/clusters/{cid}/thumbnail"
-        })
+        rep = cdata["representative"]
+        filename = Path(rep["path"]).name
+        drive_id = mapping.get(filename, "")
+        loc = rep["location"]
+        rep_key = f"{drive_id}_{loc[0]}_{loc[1]}_{loc[2]}_{loc[3]}"
+
+        name = names_data.get(rep_key) or names_data.get(cid, f"Person #{cid}")
+        ui_clusters.append(
+            {
+                "id": cid,
+                "name": name,
+                "count": cdata["count"],
+                "thumbnail_url": f"/faces/clusters/{cid}/thumbnail",
+            }
+        )
     return ui_clusters
 
 
@@ -257,23 +271,39 @@ def rename_cluster(cluster_id: str, body: RenameClusterRequest):
     """Rename a face cluster — persisted to Google Drive cache."""
     from app.services.drive_cache import get_cached_json, save_cached_json
 
+    clusters = get_face_clusters()
+    if cluster_id not in clusters:
+        raise HTTPException(status_code=404, detail="Cluster not found")
+
+    rep = clusters[cluster_id]["representative"]
+    filename = Path(rep["path"]).name
+    mapping = get_filename_map()
+    drive_id = mapping.get(filename, "")
+    loc = rep["location"]
+    rep_key = f"{drive_id}_{loc[0]}_{loc[1]}_{loc[2]}_{loc[3]}"
+
     data = get_cached_json("cluster_names.json") or {}
     new_name = body.name.strip()
-    data[cluster_id] = new_name
+    data[rep_key] = new_name
+    data[cluster_id] = new_name  # for backward compatibility
     save_cached_json("cluster_names.json", data)
 
     # Auto-associate with any registered guests matching this name
     try:
         from app.database import supabase
+
         if new_name:
             guests_res = supabase.table("guests").select("id, name").execute()
             if guests_res.data:
                 for guest in guests_res.data:
                     if guest["name"].strip().lower() == new_name.lower():
                         from app.services.face_service import associate_guest_by_name
+
                         associate_guest_by_name(guest["id"], guest["name"])
     except Exception as assoc_err:
-        log.error(f"Failed to auto-associate newly renamed cluster with existing guest: {assoc_err}")
+        log.error(
+            f"Failed to auto-associate newly renamed cluster with existing guest: {assoc_err}"
+        )
 
     return {"success": True, "cluster_id": cluster_id, "name": new_name}
 
@@ -284,26 +314,30 @@ def get_cluster_photos(cluster_id: str):
     clusters = get_face_clusters()
     if cluster_id not in clusters:
         raise HTTPException(status_code=404, detail="Face cluster not found")
-    
+
     paths = clusters[cluster_id]["photos"]
     resolved = []
     mapping = get_filename_map()
-    
+
     for path in paths:
         filename = Path(path).name
         if filename in mapping:
             drive_id = mapping[filename]
-            is_video = filename.lower().endswith(('.mp4', '.mov', '.avi', '.mkv', '.webm'))
+            is_video = filename.lower().endswith(
+                (".mp4", ".mov", ".avi", ".mkv", ".webm")
+            )
             mime_type = "video/mp4" if is_video else "image/jpeg"
-            
-            resolved.append({
-                "drive_id": drive_id,
-                "is_common": False,  # default to False for clustering
-                "thumb_url": f"/photos/thumb/{drive_id}",
-                "stream_url": f"/photos/stream/{drive_id}",
-                "is_video": is_video,
-                "mime_type": mime_type
-            })
+
+            resolved.append(
+                {
+                    "drive_id": drive_id,
+                    "is_common": False,  # default to False for clustering
+                    "thumb_url": f"/photos/thumb/{drive_id}",
+                    "stream_url": f"/photos/stream/{drive_id}",
+                    "is_video": is_video,
+                    "mime_type": mime_type,
+                }
+            )
     return resolved
 
 
@@ -314,14 +348,7 @@ def get_cluster_thumbnail(cluster_id: str):
     """
     from app.services.drive_cache import get_cached_file, save_cached_file
 
-    cache_key = f"face_cluster_{cluster_id}.jpg"
-
-    # ── 1. Check Drive-backed cache ───────────────────────────────────────────
-    cached_data = get_cached_file(cache_key)
-    if cached_data:
-        return Response(content=cached_data, media_type="image/jpeg")
-
-    # ── 2. Generate fresh thumbnail ───────────────────────────────────────────
+    # ── Get fresh cluster representative details first to find its stable key ─────
     clusters = get_face_clusters()
     if cluster_id not in clusters:
         raise HTTPException(status_code=404, detail="Face cluster not found")
@@ -335,15 +362,26 @@ def get_cluster_thumbnail(cluster_id: str):
     filename = Path(path_str).name
     mapping = get_filename_map()
     if filename not in mapping:
-        raise HTTPException(status_code=404, detail="Source media file not found in Google Drive")
+        raise HTTPException(
+            status_code=404, detail="Source media file not found in Google Drive"
+        )
 
     drive_id = mapping[filename]
 
+    # ── Use stable, unique cache key based on file ID and face location ─────────
+    cache_key = f"face_cluster_{drive_id}_{location[0]}_{location[1]}_{location[2]}_{location[3]}.jpg"
+
+    # ── 1. Check Drive-backed cache ───────────────────────────────────────────
+    cached_data = get_cached_file(cache_key)
+    if cached_data:
+        return Response(content=cached_data, media_type="image/jpeg")
+
+    # ── 2. Generate fresh thumbnail ───────────────────────────────────────────
     try:
         # Try to load size-400 thumbnail from cache first to avoid heavy download
         thumb_key = f"thumb_{drive_id}_400.jpg"
         thumb_data = get_cached_file(thumb_key)
-        
+
         img = None
         if thumb_data:
             try:
@@ -367,7 +405,9 @@ def get_cluster_thumbnail(cluster_id: str):
 
                 request = service.files().get_media(fileId=drive_id)
                 with open(temp_video, "wb") as f:
-                    downloader = MediaIoBaseDownload(f, request, chunksize=1024 * 1024 * 5)
+                    downloader = MediaIoBaseDownload(
+                        f, request, chunksize=1024 * 1024 * 5
+                    )
                     done = False
                     while not done:
                         _, done = downloader.next_chunk()
@@ -388,7 +428,9 @@ def get_cluster_thumbnail(cluster_id: str):
             else:
                 request = service.files().get_media(fileId=drive_id)
                 img_bytes = io.BytesIO()
-                downloader = MediaIoBaseDownload(img_bytes, request, chunksize=1024 * 1024 * 2)
+                downloader = MediaIoBaseDownload(
+                    img_bytes, request, chunksize=1024 * 1024 * 2
+                )
                 done = False
                 while not done:
                     _, done = downloader.next_chunk()
@@ -401,7 +443,9 @@ def get_cluster_thumbnail(cluster_id: str):
             w, h = img.size
             if max(w, h) > 1200:
                 scale = 1200 / max(w, h)
-                img = img.resize((int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
+                img = img.resize(
+                    (int(w * scale), int(h * scale)), Image.Resampling.LANCZOS
+                )
                 w, h = img.size
 
             top, right, bottom, left = location
@@ -412,12 +456,14 @@ def get_cluster_thumbnail(cluster_id: str):
         pad_y = int(fh * 0.45)
         pad_x = int(fw * 0.45)
 
-        cropped = img.crop((
-            max(0, left - pad_x),
-            max(0, top - pad_y),
-            min(w, right + pad_x),
-            min(h, bottom + pad_y),
-        ))
+        cropped = img.crop(
+            (
+                max(0, left - pad_x),
+                max(0, top - pad_y),
+                min(w, right + pad_x),
+                min(h, bottom + pad_y),
+            )
+        )
         cropped = cropped.resize((150, 150), Image.Resampling.LANCZOS)
 
         buf = io.BytesIO()
@@ -431,4 +477,6 @@ def get_cluster_thumbnail(cluster_id: str):
 
     except Exception as e:
         log.error(f"Error creating thumbnail for face cluster {cluster_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to generate face thumbnail: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to generate face thumbnail: {e}"
+        )
