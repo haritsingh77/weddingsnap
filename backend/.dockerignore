@@ -1,0 +1,12 @@
+.env
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pkl
+*.log
+encodings/
+temp_preprocess/
+*.DS_Store
+service-account.json

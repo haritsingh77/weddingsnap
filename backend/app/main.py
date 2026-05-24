@@ -5,9 +5,13 @@ from app.routes import auth, faces, photos, download, admin
 
 app = FastAPI(title="WeddingSnap API", version="1.0.0")
 
+import os
+
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],

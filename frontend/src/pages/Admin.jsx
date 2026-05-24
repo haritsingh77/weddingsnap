@@ -42,6 +42,7 @@ export default function Admin() {
   const [reviewPhotos, setReviewPhotos] = useState([])
   const [loadingPhotos, setLoadingPhotos] = useState(false)
   const [lightboxIndex, setLightboxIndex] = useState(null)
+  const [tolerance, setTolerance] = useState(0.55)
 
   // Auto-authenticate if password already stored
   useEffect(() => {
@@ -90,7 +91,7 @@ export default function Admin() {
     setCreatingGuest(true)
     setCreateMessage('')
     try {
-      const res = await adminCreateGuest(newGuestName.trim(), newGuestPhone.trim(), selfieFile)
+      const res = await adminCreateGuest(newGuestName.trim(), newGuestPhone.trim(), selfieFile, tolerance)
       setCreateMessage(`Guest "${res.data.name}" added successfully! ${res.data.photo_count} matches found.`)
       setNewGuestName('')
       setNewGuestPhone('+91')
@@ -114,12 +115,12 @@ export default function Admin() {
   }
 
   const handleRunMatching = async (guestId) => {
-    if (!window.confirm("Re-run face matching for this guest? This will check all photos again but preserve your manual removals.")) {
+    if (!window.confirm(`Re-run face matching for this guest with tolerance ${tolerance}? This will check all photos again but preserve your manual removals.`)) {
       return
     }
     setGuests(prev => prev.map(g => g.id === guestId ? { ...g, photo_count: 'Matching...' } : g))
     try {
-      const res = await adminRunGuestMatching(guestId)
+      const res = await adminRunGuestMatching(guestId, tolerance)
       setGuests(prev => prev.map(g => g.id === guestId ? { ...g, photo_count: res.data.photo_count } : g))
       alert(res.data.message || "Matching complete!")
     } catch (err) {
@@ -130,13 +131,13 @@ export default function Admin() {
   }
 
   const handleRunBatchMatching = async () => {
-    if (!window.confirm("Are you sure you want to run matching for all guests? This processes all 12,000+ photos against all guest selfies in the background.")) {
+    if (!window.confirm(`Are you sure you want to run matching for all guests with tolerance ${tolerance}? This processes all 12,000+ photos against all guest selfies in the background.`)) {
       return
     }
     setBatchMatching(true)
     setBatchResult('Processing matching pipeline against entire catalog...')
     try {
-      const res = await adminRunMatchingAll()
+      const res = await adminRunMatchingAll(tolerance)
       setBatchResult(res.data.message || `Successfully matched guests!`)
       fetchGuestsList()
     } catch (err) {
@@ -326,8 +327,32 @@ export default function Admin() {
           </div>
 
           <div className="bg-white p-6 rounded-2xl border border-stone-200/50 shadow-sm">
-            <h2 className="font-serif text-lg text-stone-800 mb-2">Global Operations</h2>
-            <p className="text-stone-400 text-xs mb-4">Run the matching algorithm for all registered guests concurrently.</p>
+            <h2 className="font-serif text-lg text-stone-800 mb-2">Matching Settings</h2>
+            <p className="text-stone-400 text-xs mb-4">Adjust the accuracy threshold. Higher numbers find more photos but may introduce wrong matches.</p>
+            
+            <div className="mb-6 bg-stone-50/50 p-4 rounded-xl border border-stone-150/50">
+              <div className="flex justify-between text-xs font-bold text-stone-500 uppercase tracking-wider mb-1.5">
+                <span>Distance Threshold</span>
+                <span className="font-mono text-stone-900 text-sm font-bold bg-white px-2 py-0.5 rounded border border-stone-200 shadow-sm">{tolerance}</span>
+              </div>
+              <input
+                type="range"
+                min="0.40"
+                max="0.65"
+                step="0.01"
+                value={tolerance}
+                onChange={(e) => setTolerance(parseFloat(e.target.value))}
+                className="w-full h-1.5 bg-stone-200 rounded-lg appearance-none cursor-pointer accent-stone-850"
+              />
+              <div className="flex justify-between text-[10px] text-stone-400 mt-1.5">
+                <span>Strict (0.40)</span>
+                <span>Balanced (0.55 - 0.60)</span>
+                <span>Relaxed (0.65)</span>
+              </div>
+            </div>
+
+            <h3 className="font-serif text-sm text-stone-800 mb-1 border-t border-stone-100 pt-3">Global Operations</h3>
+            <p className="text-stone-400 text-[10px] mb-3">Re-run the matching algorithm for all registered guests concurrently.</p>
             
             {batchResult && (
               <div className="bg-stone-50 border border-stone-150 rounded-xl p-3 mb-4 text-stone-600 text-xs font-mono whitespace-pre-line leading-relaxed">

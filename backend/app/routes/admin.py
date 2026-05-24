@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Header, Response
 from pydantic import BaseModel
@@ -54,6 +55,7 @@ async def create_guest(
     name: str = Form(...),
     phone: str = Form(""),
     selfie: UploadFile = File(None),
+    tolerance: Optional[float] = Form(None),
     x_admin_password: str = Header(..., alias="x-admin-password")
 ):
     """Register a new guest, cache their selfie to Google Drive, and run initial matching."""
@@ -98,7 +100,7 @@ async def create_guest(
                     log.warning(f"Could not auto-name cluster on create: {auto_name_err}")
 
                 # Run matching
-                match_result = match_guest_selfie(selfie_bytes)
+                match_result = match_guest_selfie(selfie_bytes, tolerance=tolerance)
                 if match_result.get("success", True):
                     personal_ids = resolve_drive_ids(match_result["personal_photos"])
                     common_ids = resolve_drive_ids(match_result["common_photos"])
@@ -203,7 +205,7 @@ def remove_guest_photo(guest_id: str, photo_id: str, x_admin_password: str = Hea
 
 
 @router.post("/guests/{guest_id}/run-matching")
-def run_guest_matching(guest_id: str, x_admin_password: str = Header(..., alias="x-admin-password")):
+def run_guest_matching(guest_id: str, tolerance: Optional[float] = None, x_admin_password: str = Header(..., alias="x-admin-password")):
     """Re-runs matching for a specific guest using their stored reference selfie."""
     if x_admin_password != settings.ADMIN_PASSWORD:
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -214,7 +216,7 @@ def run_guest_matching(guest_id: str, x_admin_password: str = Header(..., alias=
         raise HTTPException(status_code=404, detail="Selfie reference photo not found.")
 
     # Match selfie
-    match_result = match_guest_selfie(selfie_data)
+    match_result = match_guest_selfie(selfie_data, tolerance=tolerance)
     if not match_result.get("success", True):
         raise HTTPException(status_code=422, detail=match_result.get("message", "No face detected in reference photo."))
 
@@ -271,7 +273,7 @@ def run_guest_matching(guest_id: str, x_admin_password: str = Header(..., alias=
 
 
 @router.post("/run-matching-all")
-def run_matching_all(x_admin_password: str = Header(..., alias="x-admin-password")):
+def run_matching_all(tolerance: Optional[float] = None, x_admin_password: str = Header(..., alias="x-admin-password")):
     """Re-runs face matching for all registered guests against precomputed encodings."""
     if x_admin_password != settings.ADMIN_PASSWORD:
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -296,7 +298,7 @@ def run_matching_all(x_admin_password: str = Header(..., alias="x-admin-password
             continue
 
         try:
-            match_result = match_guest_selfie(selfie_data)
+            match_result = match_guest_selfie(selfie_data, tolerance=tolerance)
             if not match_result.get("success", True):
                 errors.append(f"Guest {guest['name']}: {match_result.get('message', 'Failed')}")
                 continue

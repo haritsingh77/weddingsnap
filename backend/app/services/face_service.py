@@ -157,7 +157,7 @@ def find_matching_photos(guest_encoding: np.ndarray, tolerance: float = None) ->
 # ── Main entry point ──────────────────────────────────────────────────────────
 
 
-def match_guest_selfie(image_bytes: bytes) -> dict:
+def match_guest_selfie(image_bytes: bytes, tolerance: float = None) -> dict:
     """
     Full pipeline: selfie bytes → matched photo paths.
     This is what the API route calls.
@@ -172,7 +172,7 @@ def match_guest_selfie(image_bytes: bytes) -> dict:
         }
 
     # Step 2 — match against all wedding photos
-    results = find_matching_photos(guest_encoding)
+    results = find_matching_photos(guest_encoding, tolerance=tolerance)
 
     if results["total_matches"] == 0 and results["common_count"] == 0:
         return {

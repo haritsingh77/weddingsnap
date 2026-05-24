@@ -64,12 +64,15 @@ export const adminLogin = (password) =>
 export const adminGetGuests = () =>
   api.get('/admin/guests')
 
-export const adminCreateGuest = (name, phone, selfieFile) => {
+export const adminCreateGuest = (name, phone, selfieFile, tolerance = null) => {
   const form = new FormData()
   form.append('name', name)
   form.append('phone', phone || '')
   if (selfieFile) {
     form.append('selfie', selfieFile)
+  }
+  if (tolerance !== null && tolerance !== undefined) {
+    form.append('tolerance', tolerance)
   }
   return api.post('/admin/guests', form)
 }
@@ -80,11 +83,11 @@ export const adminGetGuestPhotos = (guestId) =>
 export const adminRemoveGuestPhoto = (guestId, photoId) =>
   api.delete(`/admin/guests/${guestId}/photos/${photoId}`)
 
-export const adminRunGuestMatching = (guestId) =>
-  api.post(`/admin/guests/${guestId}/run-matching`)
+export const adminRunGuestMatching = (guestId, tolerance = null) =>
+  api.post(`/admin/guests/${guestId}/run-matching${tolerance !== null && tolerance !== undefined ? `?tolerance=${tolerance}` : ''}`)
 
-export const adminRunMatchingAll = () =>
-  api.post('/admin/run-matching-all')
+export const adminRunMatchingAll = (tolerance = null) =>
+  api.post(`/admin/run-matching-all${tolerance !== null && tolerance !== undefined ? `?tolerance=${tolerance}` : ''}`)
 
 export const adminDeleteGuest = (guestId) =>
   api.delete(`/admin/guests/${guestId}`)
