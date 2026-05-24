@@ -104,7 +104,7 @@ def create_media_thumbnail(file_path: Path, is_video: bool, size: int = 400) -> 
             new_h = size
             new_w = int(w * (size / h))
             
-        img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+        img = img.resize((new_w, new_h), Image.Resampling.BILINEAR)
         
         if img.mode in ("RGBA", "P"):
             img = img.convert("RGB")

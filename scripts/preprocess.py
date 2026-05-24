@@ -118,7 +118,7 @@ def load_and_resize(path: Path) -> Optional[np.ndarray]:
         w, h = img.size
         if max(w, h) > MAX_IMAGE_SIZE:
             scale = MAX_IMAGE_SIZE / max(w, h)
-            img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+            img = img.resize((int(w * scale), int(h * scale)), Image.Resampling.BILINEAR)
         return np.array(img)
     except Exception as e:
         log.warning(f"Skipped {path.name}: {e}")
@@ -167,45 +167,44 @@ def encode_video(path: Path) -> Optional[dict]:
             cap.release()
             return None
 
-        # Sample 1 frame per second of video
-        sample_interval = max(1, int(fps))
+        # Sample 1 frame per 3 seconds of video (more than enough for face recognition)
+        sample_interval = max(1, int(fps * 3))
         unique_samples = []  # List of tuples: (location, encoding, frame_idx)
         max_faces_in_frame = 0
 
         frame_idx = 0
         while True:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
             ret, frame = cap.read()
             if not ret:
                 break
 
-            # Convert BGR (OpenCV) to RGB
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            
-            # Resize for speed
-            h, w = rgb_frame.shape[:2]
-            if max(h, w) > MAX_IMAGE_SIZE:
-                scale = MAX_IMAGE_SIZE / max(h, w)
-                rgb_frame = cv2.resize(rgb_frame, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+            # Only process every sample_interval frames
+            if frame_idx % sample_interval == 0:
+                # Convert BGR (OpenCV) to RGB
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                
+                # Resize for speed
+                h, w = rgb_frame.shape[:2]
+                if max(h, w) > MAX_IMAGE_SIZE:
+                    scale = MAX_IMAGE_SIZE / max(h, w)
+                    rgb_frame = cv2.resize(rgb_frame, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
 
-            # Detect faces in frame
-            locations = face_recognition.face_locations(rgb_frame, model="hog")
-            if locations:
-                max_faces_in_frame = max(max_faces_in_frame, len(locations))
-                encodings = face_recognition.face_encodings(rgb_frame, locations)
-                for loc, enc in zip(locations, encodings):
-                    # Avoid adding duplicate encodings of the same person
-                    if not unique_samples:
-                        unique_samples.append((loc, enc, frame_idx))
-                    else:
-                        existing_encs = [s[1] for s in unique_samples]
-                        distances = face_recognition.face_distance(existing_encs, enc)
-                        if not any(d < 0.5 for d in distances):
+                # Detect faces in frame
+                locations = face_recognition.face_locations(rgb_frame, model="hog")
+                if locations:
+                    max_faces_in_frame = max(max_faces_in_frame, len(locations))
+                    encodings = face_recognition.face_encodings(rgb_frame, locations)
+                    for loc, enc in zip(locations, encodings):
+                        # Avoid adding duplicate encodings of the same person
+                        if not unique_samples:
                             unique_samples.append((loc, enc, frame_idx))
+                        else:
+                            existing_encs = [s[1] for s in unique_samples]
+                            distances = face_recognition.face_distance(existing_encs, enc)
+                            if not any(d < 0.5 for d in distances):
+                                unique_samples.append((loc, enc, frame_idx))
 
-            frame_idx += sample_interval
-            if frame_idx >= total_frames:
-                break
+            frame_idx += 1
 
         cap.release()
 
