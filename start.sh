@@ -41,13 +41,13 @@ if [ ! -d "venv" ]; then
     echo -e "${RED}[Backend] Error: virtual environment 'venv' not found in backend/ directory.${NC}"
     exit 1
 fi
-venv/bin/uvicorn app.main:app --reload --port 8000 &
+venv/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 &
 BACKEND_PID=$!
 
 # 2. Start frontend server
 echo -e "${GREEN}[Frontend]${NC} Starting Vite dev server..."
 cd "$SCRIPT_DIR/frontend"
-npm run dev &
+npm run dev -- --host &
 FRONTEND_PID=$!
 
 # Wait for both background processes
