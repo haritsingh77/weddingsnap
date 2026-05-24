@@ -5,7 +5,7 @@ Face registration and matching routes.
 import logging
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Response
 
 from app.database import supabase
 from app.services.face_service import match_guest_selfie, resolve_drive_ids
@@ -244,7 +244,39 @@ class RenameClusterRequest(BaseModel):
 def get_clusters():
     """Get list of recognized face clusters with counts, names, and thumbnail links."""
     from app.services.drive_cache import get_cached_json
+    from app.database import supabase
+    from app.config import settings
 
+    # 1. Fetch registered guests with photo counts
+    guests_list = []
+    registered_names = set()
+    try:
+        guests_res = supabase.table("guests").select("*").order("name").execute()
+        guests = guests_res.data or []
+        
+        # Get count of matched photos per guest
+        gp_res = supabase.table("guest_photos").select("guest_id").execute()
+        counts = {}
+        for row in gp_res.data:
+            gid = row["guest_id"]
+            counts[gid] = counts.get(gid, 0) + 1
+
+        for guest in guests:
+            guest_id = guest["id"]
+            cnt = counts.get(guest_id, 0)
+            if cnt > 0: # only show guests who have matches
+                guests_list.append({
+                    "id": f"guest_{guest_id}",
+                    "name": guest["name"],
+                    "count": cnt,
+                    "thumbnail_url": f"/faces/guests/{guest_id}/selfie",
+                    "is_guest": True
+                })
+                registered_names.add(guest["name"].strip().lower())
+    except Exception as e:
+        log.error(f"Error fetching guests for clusters tab: {e}")
+
+    # 2. Fetch raw face clusters
     clusters = get_face_clusters()
     names_data = get_cached_json("cluster_names.json") or {}
     mapping = get_filename_map()
@@ -258,20 +290,35 @@ def get_clusters():
         rep_key = f"{drive_id}_{loc[0]}_{loc[1]}_{loc[2]}_{loc[3]}"
 
         name = names_data.get(rep_key) or names_data.get(cid, f"Person #{cid}")
+        
+        # Skip this cluster if it's already named after a registered guest
+        if name.strip().lower() in registered_names:
+            continue
+
         ui_clusters.append(
             {
                 "id": cid,
                 "name": name,
                 "count": cdata["count"],
                 "thumbnail_url": f"/faces/clusters/{cid}/thumbnail",
+                "is_guest": False
             }
         )
-    return ui_clusters
+
+    # Sort raw clusters by count descending, then append after guests
+    ui_clusters = sorted(ui_clusters, key=lambda x: x["count"], reverse=True)
+    return guests_list + ui_clusters
 
 
 @router.post("/clusters/{cluster_id}/rename")
 def rename_cluster(cluster_id: str, body: RenameClusterRequest):
     """Rename a face cluster — persisted to Google Drive cache."""
+    if cluster_id.startswith("guest_"):
+        guest_id = cluster_id.replace("guest_", "")
+        new_name = body.name.strip()
+        supabase.table("guests").update({"name": new_name}).eq("id", guest_id).execute()
+        return {"success": True, "cluster_id": cluster_id, "name": new_name}
+
     from app.services.drive_cache import get_cached_json, save_cached_json
 
     clusters = get_face_clusters()
@@ -313,7 +360,43 @@ def rename_cluster(cluster_id: str, body: RenameClusterRequest):
 
 @router.get("/clusters/{cluster_id}/photos")
 def get_cluster_photos(cluster_id: str):
-    """Get all photos/videos featuring the person in the specified cluster."""
+    """Get all photos/videos featuring the person in the specified cluster or guest album."""
+    if cluster_id.startswith("guest_"):
+        guest_id = cluster_id.replace("guest_", "")
+        
+        # Fetch guest personal photos
+        gp_res = supabase.table("guest_photos").select("photo_id").eq("guest_id", guest_id).execute()
+        if not gp_res.data:
+            return []
+
+        photo_ids = [row["photo_id"] for row in gp_res.data]
+        res = supabase.table("photos").select("id, drive_path, is_common, face_count").in_("id", photo_ids).execute()
+
+        from app.routes.photos import get_drive_id_to_mime_map
+        mime_map = get_drive_id_to_mime_map()
+
+        photos_list = []
+        for photo in res.data:
+            # Exclude common photos for guest view just like in personal album
+            if photo.get("is_common", False):
+                continue
+            drive_id = photo.get("drive_path")
+            if not drive_id:
+                continue
+
+            mime_type = mime_map.get(drive_id, "image/jpeg")
+            is_video = mime_type.startswith("video/")
+
+            photos_list.append({
+                "drive_id": drive_id,
+                "is_common": False,
+                "thumb_url": f"/photos/thumb/{drive_id}",
+                "stream_url": f"/photos/stream/{drive_id}",
+                "is_video": is_video,
+                "mime_type": mime_type,
+            })
+        return photos_list
+
     clusters = get_face_clusters()
     if cluster_id not in clusters:
         raise HTTPException(status_code=404, detail="Face cluster not found")
@@ -342,6 +425,16 @@ def get_cluster_photos(cluster_id: str):
                 }
             )
     return resolved
+
+
+@router.get("/guests/{guest_id}/selfie")
+def get_guest_selfie_public(guest_id: str):
+    """Public endpoint to serve guest reference selfies without admin password for gallery views."""
+    from app.services.drive_cache import get_cached_file
+    selfie_data = get_cached_file(f"selfie_{guest_id}.jpg")
+    if not selfie_data:
+        raise HTTPException(status_code=404, detail="Selfie not found")
+    return Response(content=selfie_data, media_type="image/jpeg")
 
 
 @router.get("/clusters/{cluster_id}/thumbnail")
