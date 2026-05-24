@@ -144,6 +144,7 @@ from googleapiclient.http import MediaIoBaseDownload
 
 from app.services.face_service import load_encodings, get_filename_map
 from app.services.drive_service import get_drive_service
+from app.config import settings
 
 CACHE_THUMB_DIR = Path("cache/thumbnails")
 
@@ -179,8 +180,8 @@ def get_face_clusters() -> dict:
         return {}
 
     X = np.array(X)
-    # DBSCAN clustering (0.48 distance tolerance corresponds well to HOG face distance)
-    db = DBSCAN(eps=0.48, min_samples=1, metric="euclidean").fit(X)
+    # DBSCAN clustering (uses config threshold, e.g. 0.42 to avoid false positive matches)
+    db = DBSCAN(eps=settings.FACE_MATCH_TOLERANCE, min_samples=1, metric="euclidean").fit(X)
     labels = db.labels_
 
     clusters = {}
