@@ -61,11 +61,19 @@ async def create_guest(
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     try:
+        # Resolve active invite code dynamically
+        invite_code = settings.INVITE_CODE
+        code_check = supabase.table("invite_codes").select("code").eq("code", invite_code).execute()
+        if not code_check.data:
+            invite_res = supabase.table("invite_codes").select("code").eq("active", True).execute()
+            if invite_res.data:
+                invite_code = invite_res.data[0]["code"]
+
         # Create guest record
         guest_payload = {
             "name": name.strip(),
             "phone": phone.strip(),
-            "invite_code": settings.INVITE_CODE
+            "invite_code": invite_code
         }
         res = supabase.table("guests").insert(guest_payload).execute()
         if not res.data:
