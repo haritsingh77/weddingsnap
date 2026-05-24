@@ -10,6 +10,7 @@ class Config:
     APP_ENV = os.getenv("APP_ENV", "development")
     SECRET_KEY = os.getenv("SECRET_KEY")
     INVITE_CODE = os.getenv("INVITE_CODE", "WEDDING2024")
+    ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "wedding2026")
     
     SUPABASE_URL = os.getenv("SUPABASE_URL")
     SUPABASE_KEY = os.getenv("SUPABASE_KEY")

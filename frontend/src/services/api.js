@@ -15,6 +15,14 @@ const api = axios.create({
   baseURL: getBaseURL(),
 })
 
+api.interceptors.request.use((config) => {
+  const adminPass = localStorage.getItem('admin_password')
+  if (adminPass) {
+    config.headers['x-admin-password'] = adminPass
+  }
+  return config
+})
+
 export const verifyInvite = (code, name, phone) =>
   api.post('/auth/verify-invite', { code, name, phone })
 
@@ -48,5 +56,37 @@ export const renameCluster = (clusterId, name) =>
 
 export const deletePhoto = (driveId) =>
   api.delete(`/photos/${driveId}`)
+
+// Admin endpoints
+export const adminLogin = (password) =>
+  api.post('/admin/login', { password })
+
+export const adminGetGuests = () =>
+  api.get('/admin/guests')
+
+export const adminCreateGuest = (name, phone, selfieFile) => {
+  const form = new FormData()
+  form.append('name', name)
+  form.append('phone', phone || '')
+  if (selfieFile) {
+    form.append('selfie', selfieFile)
+  }
+  return api.post('/admin/guests', form)
+}
+
+export const adminGetGuestPhotos = (guestId) =>
+  api.get(`/admin/guests/${guestId}/photos`)
+
+export const adminRemoveGuestPhoto = (guestId, photoId) =>
+  api.delete(`/admin/guests/${guestId}/photos/${photoId}`)
+
+export const adminRunGuestMatching = (guestId) =>
+  api.post(`/admin/guests/${guestId}/run-matching`)
+
+export const adminRunMatchingAll = () =>
+  api.post('/admin/run-matching-all')
+
+export const adminDeleteGuest = (guestId) =>
+  api.delete(`/admin/guests/${guestId}`)
 
 export default api
