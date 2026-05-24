@@ -138,7 +138,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from PIL import Image, ImageOps
-from sklearn.cluster import DBSCAN
+from sklearn.cluster import AgglomerativeClustering
 from fastapi import Response
 from googleapiclient.http import MediaIoBaseDownload
 
@@ -150,7 +150,7 @@ CACHE_THUMB_DIR = Path("cache/thumbnails")
 
 def get_face_clusters() -> dict:
     """
-    Cluster all precomputed face encodings in face_encodings.pkl using DBSCAN.
+    Cluster all precomputed face encodings in face_encodings.pkl using Agglomerative Clustering (complete linkage) to prevent the chaining effect.
     """
     try:
         # Clear the LRU cache to make sure we load the newly preprocessed face encodings
@@ -180,9 +180,14 @@ def get_face_clusters() -> dict:
         return {}
 
     X = np.array(X)
-    # DBSCAN clustering (uses config threshold, e.g. 0.42 to avoid false positive matches)
-    db = DBSCAN(eps=settings.FACE_MATCH_TOLERANCE, min_samples=1, metric="euclidean").fit(X)
-    labels = db.labels_
+    # Agglomerative clustering with complete linkage (guarantees no two faces in a cluster exceed settings.FACE_MATCH_TOLERANCE distance)
+    agg = AgglomerativeClustering(
+        distance_threshold=settings.FACE_MATCH_TOLERANCE,
+        n_clusters=None,
+        linkage="complete",
+        metric="euclidean"
+    ).fit(X)
+    labels = agg.labels_
 
     clusters = {}
     for idx, label in enumerate(labels):
