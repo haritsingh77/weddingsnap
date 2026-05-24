@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { verifyInvite } from '../services/api'
 
@@ -10,6 +10,42 @@ export default function Landing() {
 
     const handle = (e) => setForm({ ...form, [e.target.name]: e.target.value })
 
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search)
+        const code = params.get('code')
+        const name = params.get('name')
+        const phone = params.get('phone') || ''
+
+        if (code && name) {
+            setForm({ code: code.toUpperCase().trim(), name, phone })
+            
+            const autoLogin = async () => {
+                setLoading(true)
+                setError('')
+                try {
+                    const res = await verifyInvite(code.toUpperCase().trim(), name, phone)
+                    const { guest_id, event_name, has_selfie } = res.data
+                    localStorage.setItem('guest_id', guest_id)
+                    localStorage.setItem('guest_name', name)
+                    localStorage.setItem('event_name', event_name)
+                    localStorage.setItem('invite_code', code.toUpperCase().trim())
+                    
+                    if (has_selfie) {
+                        navigate('/gallery')
+                    } else {
+                        navigate('/register')
+                    }
+                } catch (err) {
+                    console.error("Auto login failed:", err)
+                    setError(err.response?.data?.detail || 'Auto-login failed. Please verify credentials manually.')
+                } finally {
+                    setLoading(false)
+                }
+            }
+            autoLogin()
+        }
+    }, [navigate])
+
     const submit = async () => {
         if (!form.code || !form.name) {
             setError('Please enter your invite code and name.')
@@ -19,12 +55,17 @@ export default function Landing() {
         setError('')
         try {
             const res = await verifyInvite(form.code, form.name, form.phone)
-            const { guest_id, event_name } = res.data
+            const { guest_id, event_name, has_selfie } = res.data
             localStorage.setItem('guest_id', guest_id)
             localStorage.setItem('guest_name', form.name)
             localStorage.setItem('event_name', event_name)
             localStorage.setItem('invite_code', form.code.toUpperCase().trim())
-            navigate('/register')
+            
+            if (has_selfie) {
+                navigate('/gallery')
+            } else {
+                navigate('/register')
+            }
         } catch (err) {
             setError(err.response?.data?.detail || 'Invalid code or something went wrong.')
         } finally {
