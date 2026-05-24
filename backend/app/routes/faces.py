@@ -21,10 +21,15 @@ router = APIRouter(prefix="/faces", tags=["faces"])
 async def register_face(
     guest_id: str = Form(...),
     selfie: UploadFile = File(...),
+    selfie2: UploadFile = File(None),
+    selfie3: UploadFile = File(None),
+    selfie4: UploadFile = File(None),
+    selfie5: UploadFile = File(None),
 ):
     """
     Step 2 of guest flow.
-    Guest uploads selfie → system finds all their photos.
+    Guest uploads 1–5 selfies (different angles) → system finds all their photos.
+    More angles = better accuracy.
     """
     try:
         # Validate guest exists
@@ -32,13 +37,32 @@ async def register_face(
         if not guest.data:
             raise HTTPException(status_code=404, detail="Guest not found")
 
-        # Read selfie bytes
+        # Read primary selfie bytes
         image_bytes = await selfie.read()
         if len(image_bytes) > 10 * 1024 * 1024:  # 10MB limit
             raise HTTPException(status_code=400, detail="Selfie too large. Max 10MB.")
 
-        # Run face matching
-        match_result = match_guest_selfie(image_bytes)
+        # Read extra angle selfies
+        extra_selfie_bytes = []
+        for extra_upload in [selfie2, selfie3, selfie4, selfie5]:
+            if extra_upload is not None:
+                extra_bytes = await extra_upload.read()
+                if len(extra_bytes) > 0:
+                    extra_selfie_bytes.append(extra_bytes)
+
+        log.info(
+            f"Guest {guest_id}: received {1 + len(extra_selfie_bytes)} selfie angle(s)"
+        )
+
+        # Save primary selfie as reference (used in Recognized Faces panel)
+        from app.services.drive_cache import save_cached_file
+        save_cached_file(f"selfie_{guest_id}.jpg", image_bytes)
+
+        # Run face matching with all angles
+        match_result = match_guest_selfie(
+            image_bytes,
+            extra_selfie_bytes=extra_selfie_bytes if extra_selfie_bytes else None
+        )
 
         if not match_result["success"]:
             raise HTTPException(status_code=422, detail=match_result["message"])
@@ -51,9 +75,6 @@ async def register_face(
         common_ids = resolve_drive_ids(match_result["common_photos"])
 
         # ── Deduplicate before upsert ─────────────────────────────────────────
-        # A photo can appear in both personal_ids and common_ids.
-        # Build a dict keyed on drive_id so each ID appears exactly once.
-        # Common status takes precedence (overrides personal).
         unique_photos: dict[str, dict] = {}
         for drive_id in personal_ids:
             if drive_id:
@@ -107,9 +128,17 @@ async def register_face(
             }
         ).eq("id", guest_id).execute()
 
+        # Confidence summary
+        confidence_map = match_result.get("confidence_map", {})
+        confidences = list(confidence_map.values())
+        avg_confidence = round(sum(confidences) / len(confidences), 1) if confidences else 0
+        high_conf_count = sum(1 for c in confidences if c >= 70)
+
         log.info(
             f"Guest {guest_id} matched: "
-            f"{len(personal_ids)} personal + {len(common_ids)} common photos"
+            f"{len(personal_ids)} personal + {len(common_ids)} common photos | "
+            f"Avg confidence: {avg_confidence}% | "
+            f"Angles used: {match_result.get('selfie_angles_used', 1)}"
         )
 
         return {
@@ -117,7 +146,13 @@ async def register_face(
             "personal_count": len(personal_ids),
             "common_count": len(common_ids),
             "total": len(personal_ids) + len(common_ids),
-            "message": f"Found {len(personal_ids)} photos of you and {len(common_ids)} group photos!",
+            "angles_used": match_result.get("selfie_angles_used", 1),
+            "avg_confidence": avg_confidence,
+            "high_confidence_matches": high_conf_count,
+            "message": (
+                f"Found {len(personal_ids)} photos of you and {len(common_ids)} group photos! "
+                f"Average match confidence: {avg_confidence}%"
+            ),
         }
 
     except Exception as e:

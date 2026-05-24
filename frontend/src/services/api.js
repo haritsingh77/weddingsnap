@@ -26,10 +26,15 @@ api.interceptors.request.use((config) => {
 export const verifyInvite = (code, name, phone) =>
   api.post('/auth/verify-invite', { code, name, phone })
 
-export const registerFace = (guestId, selfieFile) => {
+export const registerFace = (guestId, selfieFiles) => {
   const form = new FormData()
   form.append('guest_id', guestId)
-  form.append('selfie', selfieFile)
+  // selfieFiles can be a single File or an array of Files
+  const files = Array.isArray(selfieFiles) ? selfieFiles : [selfieFiles]
+  files.forEach((file, idx) => {
+    const key = idx === 0 ? 'selfie' : `selfie${idx + 1}`
+    form.append(key, file)
+  })
   return api.post('/faces/register', form)
 }
 

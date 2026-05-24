@@ -42,6 +42,8 @@ from scripts.preprocess import (
     SUPPORTED_VIDEO_EXTENSIONS,
     SUPPORTED_EXTENSIONS
 )
+from scripts.whatsapp_notifier import send_whatsapp
+import time
 
 logging.basicConfig(
     level=logging.INFO,
@@ -117,7 +119,10 @@ def create_media_thumbnail(file_path: Path, is_video: bool, size: int = 400) -> 
         return None
 
 
-def run_drive_preprocess(output_folder: Path, resume: bool, limit_photos: int = None, limit_videos: int = None):
+def run_drive_preprocess(output_folder: Path, resume: bool, limit_photos: int = None, limit_videos: int = None, model: str = "cnn"):
+    start_time = time.time()
+    last_whatsapp_time = start_time
+
     output_folder.mkdir(parents=True, exist_ok=True)
     cache_path   = output_folder / "face_encodings.pkl"
     progress_log = output_folder / "processed_files.txt"
@@ -170,6 +175,8 @@ def run_drive_preprocess(output_folder: Path, resume: bool, limit_photos: int = 
         if Path(f["name"]).suffix.lower() in SUPPORTED_EXTENSIONS and not f["name"].startswith("._")
     ]
     log.info(f"Filtered to {len(filtered_files):,} supported photos and videos")
+    
+    send_whatsapp(f"🚀 WeddingSnap face preprocessor started!\nModel: {model.upper()}\nTotal files to scan: {len(filtered_files)}")
 
     skipped = failed = success = 0
     success_photos = 0
@@ -228,9 +235,9 @@ def run_drive_preprocess(output_folder: Path, resume: bool, limit_photos: int = 
                 
                 # ── 2. Run Face Matching & Encodings ──
                 if is_vid:
-                    result = encode_video(temp_path)
+                    result = encode_video(temp_path, model=model)
                 else:
-                    result = encode_photo(temp_path)
+                    result = encode_photo(temp_path, model=model)
 
                 if result:
                     # Clean up local path prefix and replace with a clean virtual path
@@ -272,6 +279,21 @@ def run_drive_preprocess(output_folder: Path, resume: bool, limit_photos: int = 
                 log.info("Uploading checkpoint to Supabase Storage...")
                 save_cached_file("face_encodings.pkl", cache_path.read_bytes(), mime_type="application/octet-stream")
                 save_cached_file("processed_files.txt", progress_log.read_bytes(), mime_type="text/plain")
+                
+                # Periodically send progress updates to WhatsApp (every 1 hour or 500 files)
+                current_time = time.time()
+                total_processed = success + failed
+                if (current_time - last_whatsapp_time >= 3600) or (total_processed > 0 and total_processed % 500 == 0):
+                    elapsed_min = int((current_time - start_time) / 60)
+                    pct = (total_processed / len(filtered_files)) * 100 if filtered_files else 0
+                    msg = (
+                        f"📈 WeddingSnap Preprocessing Update:\n"
+                        f"Processed: {total_processed}/{len(filtered_files)} ({pct:.1f}%)\n"
+                        f"Elapsed: {elapsed_min} mins\n"
+                        f"Faces found: {sum(r.get('face_count', 0) for r in all_results)}"
+                    )
+                    send_whatsapp(msg)
+                    last_whatsapp_time = current_time
 
     # Save final results
     with open(cache_path, "wb") as f:
@@ -294,6 +316,13 @@ def run_drive_preprocess(output_folder: Path, resume: bool, limit_photos: int = 
     log.info(f"   Skipped    : {skipped:,} files")
     log.info(f"   Failed     : {failed:,} files")
     log.info(f"   Saved to   : {cache_path}")
+    
+    send_whatsapp(
+        f"✅ WeddingSnap Preprocessing Complete!\n"
+        f"Model: {model.upper()}\n"
+        f"Processed: {success} files\n"
+        f"Failed: {failed} files"
+    )
 
 
 if __name__ == "__main__":
@@ -315,6 +344,13 @@ if __name__ == "__main__":
         default=None,
         help="Max number of videos to process during this run",
     )
+    parser.add_argument(
+        "--model",
+        type=str,
+        choices=["hog", "cnn"],
+        default="cnn",
+        help="Face detection model: 'hog' (fast/CPU) or 'cnn' (accurate/slow, recommended overnight). Default: cnn",
+    )
     args = parser.parse_args()
 
     output_dir = Path(settings.ENCODINGS_CACHE_PATH).parent
@@ -323,14 +359,16 @@ if __name__ == "__main__":
     log.info(f"Drive Folder ID : {settings.GOOGLE_DRIVE_FOLDER_ID}")
     log.info(f"Output Cache    : {settings.ENCODINGS_CACHE_PATH}")
     log.info(f"Resume          : {not args.no_resume}")
+    log.info(f"Model           : {args.model.upper()} {'(accurate — will take 8-14hrs on Intel CPU)' if args.model == 'cnn' else '(fast)'} ")
     if args.limit_photos is not None:
         log.info(f"Photo Limit     : {args.limit_photos}")
     if args.limit_videos is not None:
         log.info(f"Video Limit     : {args.limit_videos}")
 
     run_drive_preprocess(
-        output_dir, 
+        output_dir,
         resume=not args.no_resume,
         limit_photos=args.limit_photos,
-        limit_videos=args.limit_videos
+        limit_videos=args.limit_videos,
+        model=args.model,
     )

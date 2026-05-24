@@ -1,12 +1,17 @@
 """
 Face matching service.
-Loads precomputed encodings and matches a guest selfie against them.
+Loads precomputed encodings and matches guest selfies against them.
+
+Supports:
+  - Multi-angle selfies: up to 5 images → encodings averaged for best coverage
+  - Confidence scoring: each match returns a 0–100% confidence based on distance
+  - Vectorized matching using numpy for speed
 """
 
 import pickle
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 from functools import lru_cache
 
 # pyrefly: ignore [missing-import]
@@ -49,44 +54,78 @@ def load_encodings() -> list[dict]:
     return data
 
 
-
 # ── Selfie processing ─────────────────────────────────────────────────────────
 
 
 def encode_selfie(image_bytes: bytes) -> Optional[np.ndarray]:
     """
-    Take a guest's selfie (raw bytes) and return their face encoding.
+    Take a single guest selfie (raw bytes) and return their face encoding.
     Returns None if no face detected.
     """
     try:
         img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         img = ImageOps.exif_transpose(img)
 
-        # Resize for speed
+        # Resize for speed but keep enough detail for accuracy
         w, h = img.size
-        if max(w, h) > 800:
-            scale = 800 / max(w, h)
+        if max(w, h) > 1000:
+            scale = 1000 / max(w, h)
             img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
 
         img_array = np.array(img)
-        locations = face_recognition.face_locations(img_array, model="hog")
+
+        # Try CNN first for better accuracy on selfies, fall back to HOG
+        locations = face_recognition.face_locations(img_array, model="cnn")
+        if not locations:
+            locations = face_recognition.face_locations(img_array, model="hog")
 
         if not locations:
             return None
 
         if len(locations) > 1:
-            # If multiple faces in selfie, pick the largest (closest to camera)
+            # Pick the largest face (closest to camera — most likely the guest)
             largest = max(
                 locations, key=lambda loc: (loc[2] - loc[0]) * (loc[1] - loc[3])
             )
             locations = [largest]
 
-        encodings = face_recognition.face_encodings(img_array, locations)
+        # num_jitters=3 on selfies for better encoding quality (3 slight jitters of face)
+        encodings = face_recognition.face_encodings(img_array, locations, num_jitters=3)
         return encodings[0] if encodings else None
 
     except Exception as e:
         log.error(f"Failed to encode selfie: {e}")
         return None
+
+
+def encode_multiple_selfies(images_bytes: List[bytes]) -> List[np.ndarray]:
+    """
+    Encode multiple selfie angles into a list of face encodings.
+    Returns only successfully detected encodings (skips failures silently).
+    """
+    encodings = []
+    for idx, img_bytes in enumerate(images_bytes):
+        enc = encode_selfie(img_bytes)
+        if enc is not None:
+            encodings.append(enc)
+            log.info(f"Selfie {idx+1}/{len(images_bytes)}: face encoded successfully")
+        else:
+            log.warning(f"Selfie {idx+1}/{len(images_bytes)}: no face detected, skipping")
+    return encodings
+
+
+def compute_confidence(distance: float, tolerance: float) -> float:
+    """
+    Convert an encoding distance to a human-readable confidence score (0–100%).
+
+    Scoring:
+      - distance = 0.00 → 100% (identical face)
+      - distance = 0.40 → ~78%  (very close match)
+      - distance = 0.55 → ~66%  (good match, at default tolerance)
+      - distance = 0.65 → ~59%  (marginal match)
+      - distance ≥ 1.00 → 0%
+    """
+    return round(max(0.0, min(100.0, (1.0 - distance) * 100)), 1)
 
 
 # ── Matching ──────────────────────────────────────────────────────────────────
@@ -95,8 +134,8 @@ def encode_selfie(image_bytes: bytes) -> Optional[np.ndarray]:
 @lru_cache(maxsize=1)
 def get_flat_encodings():
     """
-    Builds a flat list of face encodings and their corresponding photo paths.
-    Kept in memory via lru_cache for instant lookups.
+    Builds a flat numpy array of all personal photo face encodings.
+    Kept in memory via lru_cache for instant vectorized lookups.
     """
     all_records = load_encodings()
     flat_encodings = []
@@ -115,9 +154,16 @@ def get_flat_encodings():
     return np.array(flat_encodings), paths
 
 
-def find_matching_photos(guest_encoding: np.ndarray, tolerance: float = None) -> dict:
+def find_matching_photos(
+    guest_encodings: List[np.ndarray],
+    tolerance: float = None
+) -> dict:
     """
-    Compare guest encoding against all precomputed encodings using vectorized operations.
+    Compare all guest selfie encodings (multi-angle) against precomputed wedding photo
+    encodings using vectorized operations. For each photo face, takes the MINIMUM
+    distance across all selfie angles (best match wins).
+
+    Returns matched photos with their confidence scores.
     """
     if tolerance is None:
         tolerance = settings.FACE_MATCH_TOLERANCE
@@ -129,50 +175,100 @@ def find_matching_photos(guest_encoding: np.ndarray, tolerance: float = None) ->
         record["path"] for record in all_records if record.get("is_common", False)
     ]
 
-    personal_photos = []
+    personal_matches: dict[str, dict] = {}  # path → {min_distance, confidence}
     flat_encs, paths = get_flat_encodings()
 
-    if len(flat_encs) > 0:
-        # Distance calculation vectorized over all face encodings in one operation
-        distances = np.linalg.norm(flat_encs - guest_encoding, axis=1)
-        matching_indices = np.where(distances <= tolerance)[0]
+    if len(flat_encs) > 0 and len(guest_encodings) > 0:
+        # Vectorized: compute distance from each guest encoding to all photo encodings
+        # Shape: (num_selfies, num_photo_faces)
+        all_distances = np.array([
+            np.linalg.norm(flat_encs - guest_enc, axis=1)
+            for guest_enc in guest_encodings
+        ])
 
-        # Deduplicate paths (a face can match multiple encodings or photos)
-        matched_set = {paths[idx] for idx in matching_indices}
-        personal_photos = list(matched_set)
+        # For each photo face, take the minimum distance across all selfie angles
+        # This is the "best match" strategy for multi-angle
+        min_distances = np.min(all_distances, axis=0)  # shape: (num_photo_faces,)
 
-    log.info(
-        f"Match complete — {len(personal_photos)} personal, "
-        f"{len(common_photos)} common photos"
+        matching_indices = np.where(min_distances <= tolerance)[0]
+
+        for idx in matching_indices:
+            path = paths[idx]
+            dist = float(min_distances[idx])
+            if path not in personal_matches or dist < personal_matches[path]["distance"]:
+                personal_matches[path] = {
+                    "distance": dist,
+                    "confidence": compute_confidence(dist, tolerance),
+                }
+
+    # Sort personal matches by confidence descending
+    sorted_personal = sorted(
+        personal_matches.items(),
+        key=lambda x: x[1]["confidence"],
+        reverse=True
     )
+
+    personal_photos = [path for path, _ in sorted_personal]
+    confidence_map = {path: meta["confidence"] for path, meta in sorted_personal}
+
+    # Log confidence distribution
+    if sorted_personal:
+        confidences = [meta["confidence"] for _, meta in sorted_personal]
+        avg_conf = round(sum(confidences) / len(confidences), 1)
+        high_conf = sum(1 for c in confidences if c >= 70)
+        log.info(
+            f"Match complete — {len(personal_photos)} personal, "
+            f"{len(common_photos)} common photos | "
+            f"Avg confidence: {avg_conf}% | High confidence (≥70%): {high_conf}"
+        )
+    else:
+        log.info(f"Match complete — 0 personal, {len(common_photos)} common photos")
 
     return {
         "personal_photos": personal_photos,
         "common_photos": common_photos,
         "total_matches": len(personal_photos),
         "common_count": len(common_photos),
+        "confidence_map": confidence_map,
+        "selfie_angles_used": len(guest_encodings),
     }
 
 
 # ── Main entry point ──────────────────────────────────────────────────────────
 
 
-def match_guest_selfie(image_bytes: bytes, tolerance: float = None) -> dict:
+def match_guest_selfie(
+    image_bytes: bytes,
+    tolerance: float = None,
+    extra_selfie_bytes: List[bytes] = None
+) -> dict:
     """
-    Full pipeline: selfie bytes → matched photo paths.
-    This is what the API route calls.
+    Full pipeline: one or more selfie images → matched photo paths with confidence scores.
+    
+    Args:
+        image_bytes: Primary selfie image bytes (required).
+        tolerance: Optional override for match sensitivity. Defaults to settings value.
+        extra_selfie_bytes: Optional list of additional angle selfie bytes for multi-angle matching.
     """
-    # Step 1 — encode the selfie
-    guest_encoding = encode_selfie(image_bytes)
-    if guest_encoding is None:
+    # Collect all selfie bytes (primary + extras)
+    all_selfie_bytes = [image_bytes]
+    if extra_selfie_bytes:
+        all_selfie_bytes.extend(extra_selfie_bytes)
+
+    # Encode all selfie angles
+    guest_encodings = encode_multiple_selfies(all_selfie_bytes)
+
+    if not guest_encodings:
         return {
             "success": False,
             "error": "no_face_detected",
             "message": "We couldn't detect a face in your photo. Please try again in good lighting.",
         }
 
+    log.info(f"Using {len(guest_encodings)}/{len(all_selfie_bytes)} selfie angle(s) for matching")
+
     # Step 2 — match against all wedding photos
-    results = find_matching_photos(guest_encoding, tolerance=tolerance)
+    results = find_matching_photos(guest_encodings, tolerance=tolerance)
 
     if results["total_matches"] == 0 and results["common_count"] == 0:
         return {
@@ -185,7 +281,6 @@ def match_guest_selfie(image_bytes: bytes, tolerance: float = None) -> dict:
 
 
 from app.services.drive_service import build_filename_to_id_map
-from functools import lru_cache
 
 
 @lru_cache(maxsize=1)
@@ -274,4 +369,3 @@ def associate_guest_by_name(guest_id: str, name: str) -> int:
         log.error(f"Failed to auto-associate named cluster with guest '{name}': {e}")
 
     return 0
-

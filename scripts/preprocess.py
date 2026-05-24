@@ -67,6 +67,13 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Resume from previous run (skip already-processed files)",
     )
+    parser.add_argument(
+        "--model",
+        type=str,
+        choices=["hog", "cnn"],
+        default="cnn",
+        help="Face detection model: 'hog' (fast, CPU) or 'cnn' (accurate, GPU/slow). Default: cnn",
+    )
 
     return parser.parse_args()
 
@@ -125,17 +132,24 @@ def load_and_resize(path: Path) -> Optional[np.ndarray]:
         return None
 
 
-def encode_photo(path: Path) -> Optional[dict]:
-    """Returns encoding data for one photo, or None if no faces found."""
+def encode_photo(path: Path, model: str = "cnn") -> Optional[dict]:
+    """Returns encoding data for one photo, or None if no faces found.
+    
+    Args:
+        path: Path to the image file.
+        model: 'hog' (fast) or 'cnn' (accurate, ~10x slower, recommended overnight).
+    """
     img = load_and_resize(path)
     if img is None:
         return None
 
-    locations = face_recognition.face_locations(img, model="hog")
+    locations = face_recognition.face_locations(img, model=model)
     if not locations:
         return None
 
-    encodings = face_recognition.face_encodings(img, locations)
+    # CNN produces more accurate locations; use num_jitters=1 for speed
+    num_jitters = 1
+    encodings = face_recognition.face_encodings(img, locations, num_jitters=num_jitters)
     face_count = len(locations)
 
     common_keywords = {"venue", "decor", "ceremony", "stage", "mandap", "common"}
@@ -150,10 +164,11 @@ def encode_photo(path: Path) -> Optional[dict]:
         "encodings": encodings,       # one per face found
         "face_count": face_count,
         "is_common": is_common,
+        "detection_model": model,     # record which model was used
     }
 
 
-def encode_video(path: Path) -> Optional[dict]:
+def encode_video(path: Path, model: str = "cnn") -> Optional[dict]:
     """Extract face encodings from a video by sampling frames."""
     try:
         cap = cv2.VideoCapture(str(path))
@@ -190,7 +205,7 @@ def encode_video(path: Path) -> Optional[dict]:
                     rgb_frame = cv2.resize(rgb_frame, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
 
                 # Detect faces in frame
-                locations = face_recognition.face_locations(rgb_frame, model="hog")
+                locations = face_recognition.face_locations(rgb_frame, model=model)
                 if locations:
                     max_faces_in_frame = max(max_faces_in_frame, len(locations))
                     encodings = face_recognition.face_encodings(rgb_frame, locations)
@@ -233,7 +248,7 @@ def encode_video(path: Path) -> Optional[dict]:
 
 # ── Main pipeline ─────────────────────────────────────────────────────────────
 
-def run(input_folder: Path, output_folder: Path, resume: bool):
+def run(input_folder: Path, output_folder: Path, resume: bool, model: str = "cnn"):
     output_folder.mkdir(parents=True, exist_ok=True)
     cache_path   = output_folder / "face_encodings.pkl"
     progress_log = output_folder / "processed_files.txt"
@@ -264,9 +279,9 @@ def run(input_folder: Path, output_folder: Path, resume: bool):
 
             suffix = media_file.suffix.lower()
             if suffix in SUPPORTED_VIDEO_EXTENSIONS:
-                result = encode_video(media_file)
+                result = encode_video(media_file, model=model)
             else:
-                result = encode_photo(media_file)
+                result = encode_photo(media_file, model=model)
 
             if result:
                 all_results.append(result)
@@ -314,4 +329,4 @@ if __name__ == "__main__":
     log.info(f"Output : {output_folder}")
     log.info(f"Resume : {args.resume}")
 
-    run(input_folder, output_folder, resume=args.resume)
+    run(input_folder, output_folder, resume=args.resume, model=args.model)

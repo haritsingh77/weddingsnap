@@ -20,7 +20,12 @@ class Config:
     GOOGLE_DRIVE_THUMBNAILS_FOLDER_ID = os.getenv("GOOGLE_DRIVE_THUMBNAILS_FOLDER_ID")
     GOOGLE_DRIVE_ENCODINGS_FOLDER_ID = os.getenv("GOOGLE_DRIVE_ENCODINGS_FOLDER_ID")
     GOOGLE_DRIVE_TEMP_DELETE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_TEMP_DELETE_FOLDER_ID")
-    GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "service-account.json")
+    
+    _service_account_path = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "service-account.json")
+    if not Path(_service_account_path).is_absolute():
+        GOOGLE_SERVICE_ACCOUNT_JSON = str(Path(__file__).resolve().parent.parent / _service_account_path)
+    else:
+        GOOGLE_SERVICE_ACCOUNT_JSON = _service_account_path
     
     FACE_MATCH_TOLERANCE = float(os.getenv("FACE_MATCH_TOLERANCE", "0.5"))
     ENCODINGS_CACHE_PATH = os.getenv(

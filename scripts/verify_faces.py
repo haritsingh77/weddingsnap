@@ -1,37 +1,82 @@
-import face_recognition
-from PIL import Image, ImageDraw, ImageOps
+import os
 import sys
-import numpy as np
+import logging
 from pathlib import Path
 
-def verify_photo(image_path):
-    print(f"Checking: {image_path}")
+# Add project root and backend to path
+project_root = Path(__file__).resolve().parent.parent
+sys.path.append(str(project_root / "backend"))
+sys.path.append(str(project_root))
+
+from app.routes.faces import get_face_clusters, get_cluster_thumbnail
+from app.services.drive_cache import get_cached_file
+from app.services.face_service import get_filename_map
+
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger(__name__)
+
+def export_clusters_for_verification():
+    verify_dir = project_root / "temp_preprocess" / "verify"
+    verify_dir.mkdir(parents=True, exist_ok=True)
     
-    # Load and fix rotation
-    img = Image.open(image_path).convert("RGB")
-    img = ImageOps.exif_transpose(img)
-    image = np.array(img)
+    print(f"🔍 Fetching face clusters from database...")
+    clusters = get_face_clusters()
     
-    # Find all face locations
-    face_locations = face_recognition.face_locations(image)
-    print(f"Found {len(face_locations)} faces in this photo.")
+    if not clusters:
+        print("⚠️ No face clusters found. Preprocessor may not have run yet or found no faces.")
+        return
+        
+    print(f"📊 Found {len(clusters)} face clusters. Exporting top 5 for verification...")
+    
+    # Get filename mapping
+    mapping = get_filename_map()
+    
+    # Export top 5 clusters
+    for rank, (cid, cdata) in enumerate(list(clusters.items())[:5], 1):
+        print(f"\n👤 [Cluster #{cid}] Rank: {rank}, Matches count: {cdata['count']}")
+        
+        # 1. Download and save the cropped face representative
+        try:
+            resp = get_cluster_thumbnail(cid)
+            rep_path = verify_dir / f"cluster_{cid}_representative.jpg"
+            rep_path.write_bytes(resp.body)
+            print(f"  ✅ Saved cropped face representative: {rep_path.relative_to(project_root)}")
+        except Exception as e:
+            print(f"  ❌ Failed to save representative thumbnail for cluster {cid}: {e}")
+            
+        # 2. Download and save up to 3 member photo thumbnails
+        member_paths = cdata["photos"][:3]
+        for idx, path_str in enumerate(member_paths, 1):
+            filename = Path(path_str).name
+            drive_id = mapping.get(filename)
+            if not drive_id:
+                continue
+                
+            try:
+                thumb_key = f"thumb_{drive_id}_400.jpg"
+                thumb_data = get_cached_file(thumb_key)
+                if thumb_data:
+                    member_path = verify_dir / f"cluster_{cid}_member_{idx}_{filename}.jpg"
+                    member_path.write_bytes(thumb_data)
+                    print(f"  ✅ Saved member photo {idx}: {member_path.relative_to(project_root)}")
+            except Exception as e:
+                print(f"  ❌ Failed to save member photo {filename}: {e}")
+                
+    print(f"\n🎉 Verification export complete! Files are saved in: {verify_dir.relative_to(project_root)}")
+    print("You can view these files to verify the correctness of the CNN face matching.")
+    
+    # Send notification via Telegram/WhatsApp
+    try:
+        from scripts.whatsapp_notifier import send_whatsapp
+        msg = (
+            f"🔍 Face Matching Verification Check:\n"
+            f"Found {len(clusters)} face clusters.\n"
+            f"Successfully exported thumbnails for the top {min(5, len(clusters))} clusters to local folder for verification."
+        )
+        send_whatsapp(msg)
+    except Exception as e:
+        print(f"Failed to send verification alert: {e}")
 
-    # Convert to PIL image to draw on it
-    pil_image = Image.fromarray(image)
-    draw = ImageDraw.Draw(pil_image)
-
-    for (top, right, bottom, left) in face_locations:
-        # Draw a box around the face
-        draw.rectangle(((left, top), (right, bottom)), outline=(255, 0, 0), width=5)
-
-    # Save the result
-    output_path = "test_result.jpg"
-    pil_image.save(output_path)
-    print(f"✅ Result saved to: {output_path}")
-    print("Open this file to see the red boxes around detected faces.")
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python scripts/verify_faces.py /path/to/photo.jpg")
-    else:
-        verify_photo(sys.argv[1])
+    export_clusters_for_verification()
