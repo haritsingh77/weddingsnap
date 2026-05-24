@@ -274,6 +274,7 @@ async def stream_photo(file_id: str, download: bool = False):
 async def get_guest_photos(guest_id: str, page: int = 1, limit: int = 50):
     """
     Returns paginated list of Drive file IDs for a guest, with video indicators.
+    Includes both personal matching photos and common/group photos.
     """
     guest = supabase.table("guests").select("id, name").eq("id", guest_id).execute()
     if not guest.data:
@@ -288,15 +289,35 @@ async def get_guest_photos(guest_id: str, page: int = 1, limit: int = 50):
 
     offset = (page - 1) * limit
 
-    result = supabase.table("guest_photos").select(
-        "photo_id, photos(drive_path, is_common, face_count)"
-    ).eq("guest_id", guest_id).range(offset, offset + limit - 1).execute()
+    # 1. Fetch personal photo IDs from guest_photos mapping table
+    gp_res = supabase.table("guest_photos").select("photo_id").eq("guest_id", guest_id).execute()
+    personal_ids = [str(row["photo_id"]) for row in gp_res.data] if (gp_res.data and len(gp_res.data) > 0) else []
+
+    # 2. Query photos table where is_common is true OR photo_id is in personal_ids
+    if personal_ids:
+        or_filter = f"is_common.eq.true,id.in.({','.join(personal_ids)})"
+        count_res = supabase.table("photos").select("id", count="exact").or_(or_filter).execute()
+        total_count = count_res.count or 0
+        
+        result = supabase.table("photos").select("drive_path, is_common, face_count")\
+            .or_(or_filter)\
+            .order("created_at", desc=True)\
+            .range(offset, offset + limit - 1)\
+            .execute()
+    else:
+        count_res = supabase.table("photos").select("id", count="exact").eq("is_common", True).execute()
+        total_count = count_res.count or 0
+        
+        result = supabase.table("photos").select("drive_path, is_common, face_count")\
+            .eq("is_common", True)\
+            .order("created_at", desc=True)\
+            .range(offset, offset + limit - 1)\
+            .execute()
 
     mime_map = get_drive_id_to_mime_map()
     photos = []
 
-    for row in result.data:
-        photo = row.get("photos", {})
+    for photo in result.data:
         drive_id = photo.get("drive_path")
         if not drive_id:
             continue
@@ -315,16 +336,12 @@ async def get_guest_photos(guest_id: str, page: int = 1, limit: int = 50):
             "mime_type": mime_type
         })
 
-    count_result = supabase.table("guest_photos").select(
-        "photo_id", count="exact"
-    ).eq("guest_id", guest_id).execute()
-
     return {
         "photos": photos,
         "page": page,
         "limit": limit,
-        "total": count_result.count,
-        "has_more": offset + limit < (count_result.count or 0)
+        "total": total_count,
+        "has_more": offset + limit < total_count
     }
 
 

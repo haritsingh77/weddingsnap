@@ -35,8 +35,20 @@ def _download_one(drive_id: str, is_common: bool, index: int):
     data = download_file_to_memory(drive_id)
     if not data:
         return None
+
+    from app.routes.photos import get_drive_id_to_mime_map
+    mime_map = get_drive_id_to_mime_map()
+    mime_type = mime_map.get(drive_id, "image/jpeg")
+
+    # Resolve correct extension
+    ext = ".jpg"
+    if mime_type in _MIME_EXT:
+        ext = _MIME_EXT[mime_type]
+    elif mime_type.startswith("video/"):
+        ext = ".mp4"
+
     folder = "Common Photos" if is_common else "My Photos"
-    filename = f"{folder}/{drive_id}_{index}.jpg"
+    filename = f"{folder}/{drive_id}_{index}{ext}"
     return filename, data
 
 
@@ -49,14 +61,21 @@ def build_zip(guest_id: str, session_id: str):
             "status": "processing"
         }).eq("id", session_id).execute()
 
-        result = supabase.table("guest_photos").select(
-            "photos(drive_path, is_common)"
-        ).eq("guest_id", guest_id).execute()
+        # 1. Fetch personal photo IDs from guest_photos mapping table
+        gp_res = supabase.table("guest_photos").select("photo_id").eq("guest_id", guest_id).execute()
+        personal_ids = [str(row["photo_id"]) for row in gp_res.data] if (gp_res.data and len(gp_res.data) > 0) else []
+
+        # 2. Query photos table where is_common is true OR photo_id is in personal_ids
+        if personal_ids:
+            or_filter = f"is_common.eq.true,id.in.({','.join(personal_ids)})"
+            result = supabase.table("photos").select("drive_path, is_common").or_(or_filter).execute()
+        else:
+            result = supabase.table("photos").select("drive_path, is_common").eq("is_common", True).execute()
 
         rows = [
-            (row["photos"]["drive_path"], row["photos"].get("is_common", False), i)
+            (row["drive_path"], row.get("is_common", False), i)
             for i, row in enumerate(result.data)
-            if row.get("photos") and row["photos"].get("drive_path")
+            if row.get("drive_path")
         ]
 
         zip_buffer = io.BytesIO()
@@ -149,15 +168,21 @@ async def stream_zip(guest_id: str, session_id: str):
 
     if not zip_bytes:
         # Fallback: rebuild if server restarted and in-memory cache was cleared
-        log.warning(f"ZIP cache miss for session {session_id}, rebuilding in parallel...")
-        result = supabase.table("guest_photos").select(
-            "photos(drive_path, is_common)"
-        ).eq("guest_id", guest_id).execute()
+        # 1. Fetch personal photo IDs from guest_photos mapping table
+        gp_res = supabase.table("guest_photos").select("photo_id").eq("guest_id", guest_id).execute()
+        personal_ids = [str(row["photo_id"]) for row in gp_res.data] if (gp_res.data and len(gp_res.data) > 0) else []
+
+        # 2. Query photos table where is_common is true OR photo_id is in personal_ids
+        if personal_ids:
+            or_filter = f"is_common.eq.true,id.in.({','.join(personal_ids)})"
+            result = supabase.table("photos").select("drive_path, is_common").or_(or_filter).execute()
+        else:
+            result = supabase.table("photos").select("drive_path, is_common").eq("is_common", True).execute()
 
         rows = [
-            (row["photos"]["drive_path"], row["photos"].get("is_common", False), i)
+            (row["drive_path"], row.get("is_common", False), i)
             for i, row in enumerate(result.data)
-            if row.get("photos") and row["photos"].get("drive_path")
+            if row.get("drive_path")
         ]
 
         buf = io.BytesIO()
