@@ -40,9 +40,22 @@ _thread_local = threading.local()
 def get_drive_service():
     """Return a Drive API client local to the current thread."""
     if not hasattr(_thread_local, "service"):
-        creds = service_account.Credentials.from_service_account_file(
-            settings.GOOGLE_SERVICE_ACCOUNT_JSON, scopes=SCOPES
-        )
+        import os
+        import json
+        google_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_CONTENT")
+        if google_json:
+            try:
+                info = json.loads(google_json.strip())
+                creds = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
+            except Exception as e:
+                log.error(f"Failed to load service account credentials from GOOGLE_SERVICE_ACCOUNT_JSON_CONTENT: {e}")
+                creds = service_account.Credentials.from_service_account_file(
+                    settings.GOOGLE_SERVICE_ACCOUNT_JSON, scopes=SCOPES
+                )
+        else:
+            creds = service_account.Credentials.from_service_account_file(
+                settings.GOOGLE_SERVICE_ACCOUNT_JSON, scopes=SCOPES
+            )
         _thread_local.service = build(
             "drive", "v3", credentials=creds, cache_discovery=False
         )

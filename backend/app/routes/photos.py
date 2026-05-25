@@ -240,10 +240,20 @@ async def stream_photo(file_id: str, download: bool = False):
                 import google.auth.transport.requests
                 import requests
                 
-                creds = service_account.Credentials.from_service_account_file(
-                    settings.GOOGLE_SERVICE_ACCOUNT_JSON,
-                    scopes=["https://www.googleapis.com/auth/drive"]
-                )
+                import os
+                import json
+                google_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_CONTENT")
+                if google_json:
+                    info = json.loads(google_json.strip())
+                    creds = service_account.Credentials.from_service_account_info(
+                        info,
+                        scopes=["https://www.googleapis.com/auth/drive"]
+                    )
+                else:
+                    creds = service_account.Credentials.from_service_account_file(
+                        settings.GOOGLE_SERVICE_ACCOUNT_JSON,
+                        scopes=["https://www.googleapis.com/auth/drive"]
+                    )
                 auth_req = google.auth.transport.requests.Request()
                 creds.refresh(auth_req)
                 

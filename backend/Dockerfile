@@ -32,6 +32,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     libgl1 \
     libglib2.0-0 \
+    libx11-6 \
+    libgtk-3-0 \
+    libpng16-16 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy compiled Python packages from builder
