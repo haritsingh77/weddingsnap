@@ -299,7 +299,7 @@ def get_clusters():
         for guest in guests:
             guest_id = guest["id"]
             cnt = counts.get(guest_id, 0)
-            if cnt > 0: # only show guests who have matches
+            if cnt > 0:  # only show guests who have matches
                 guests_list.append({
                     "id": f"guest_{guest_id}",
                     "name": guest["name"],
@@ -314,10 +314,27 @@ def get_clusters():
     # 2. Fetch raw face clusters
     clusters = get_face_clusters()
     names_data = get_cached_json("cluster_names.json") or {}
+    merges_data = get_cached_json("cluster_merges.json") or {}
     mapping = get_filename_map()
+
+    # Apply cluster merges: combine photos from source clusters into target
+    absorbed_ids = set()
+    for target_id, source_ids in merges_data.items():
+        if target_id not in clusters:
+            continue
+        for src_id in source_ids:
+            if src_id in clusters and src_id != target_id:
+                # Merge photos
+                merged_photos = set(clusters[target_id]["photos"]) | set(clusters[src_id]["photos"])
+                clusters[target_id]["photos"] = sorted(list(merged_photos))
+                clusters[target_id]["count"] = len(merged_photos)
+                absorbed_ids.add(src_id)
 
     ui_clusters = []
     for cid, cdata in clusters.items():
+        if cid in absorbed_ids:
+            continue  # skip clusters that were merged into another
+
         rep = cdata["representative"]
         filename = Path(rep["path"]).name
         drive_id = mapping.get(filename, "")
@@ -325,10 +342,13 @@ def get_clusters():
         rep_key = f"{drive_id}_{loc[0]}_{loc[1]}_{loc[2]}_{loc[3]}"
 
         name = names_data.get(rep_key) or names_data.get(cid, f"Person #{cid}")
-        
+
         # Skip this cluster if it's already named after a registered guest
         if name.strip().lower() in registered_names:
             continue
+
+        is_merged = cid in merges_data
+        merged_source_ids = merges_data.get(cid, [])
 
         ui_clusters.append(
             {
@@ -336,7 +356,9 @@ def get_clusters():
                 "name": name,
                 "count": cdata["count"],
                 "thumbnail_url": f"/faces/clusters/{cid}/thumbnail",
-                "is_guest": False
+                "is_guest": False,
+                "is_merged": is_merged,
+                "merged_sources": merged_source_ids,
             }
         )
 
@@ -391,6 +413,59 @@ def rename_cluster(cluster_id: str, body: RenameClusterRequest):
         )
 
     return {"success": True, "cluster_id": cluster_id, "name": new_name}
+
+
+class MergeClusterRequest(BaseModel):
+    target_id: str
+    source_ids: list
+
+
+@router.post("/clusters/merge")
+def merge_clusters(body: MergeClusterRequest):
+    """
+    Merge one or more source clusters into a target cluster.
+    Stored in cluster_merges.json — does not touch face_encodings.pkl.
+    """
+    from app.services.drive_cache import get_cached_json, save_cached_json
+
+    if not body.source_ids:
+        raise HTTPException(status_code=400, detail="source_ids must not be empty")
+    if body.target_id in body.source_ids:
+        raise HTTPException(status_code=400, detail="target_id must not be in source_ids")
+
+    merges = get_cached_json("cluster_merges.json") or {}
+
+    existing_sources = merges.get(body.target_id, [])
+    new_sources = list(set(existing_sources + body.source_ids))
+    new_sources = [s for s in new_sources if s != body.target_id]  # safety
+
+    # If any source was itself a merge target, absorb its children too
+    for src_id in list(body.source_ids):
+        if src_id in merges:
+            for sub_src in merges[src_id]:
+                if sub_src not in new_sources and sub_src != body.target_id:
+                    new_sources.append(sub_src)
+            del merges[src_id]
+
+    merges[body.target_id] = new_sources
+    save_cached_json("cluster_merges.json", merges)
+    log.info(f"Merged clusters {body.source_ids} into target {body.target_id}")
+    return {"success": True, "target_id": body.target_id, "merged_sources": new_sources}
+
+
+@router.delete("/clusters/{cluster_id}/unmerge")
+def unmerge_cluster(cluster_id: str):
+    """
+    Dissolve a cluster merge — restores source clusters as independent entries.
+    """
+    from app.services.drive_cache import get_cached_json, save_cached_json
+
+    merges = get_cached_json("cluster_merges.json") or {}
+    if cluster_id in merges:
+        del merges[cluster_id]
+        save_cached_json("cluster_merges.json", merges)
+        log.info(f"Unmerged cluster {cluster_id}")
+    return {"success": True, "cluster_id": cluster_id}
 
 
 @router.get("/clusters/{cluster_id}/photos")

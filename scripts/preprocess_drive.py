@@ -119,6 +119,58 @@ def create_media_thumbnail(file_path: Path, is_video: bool, size: int = 400) -> 
         return None
 
 
+def update_preprocessor_state(
+    output_folder: Path,
+    current_index: int,
+    total_files: int,
+    current_file_name: str,
+    success: int,
+    failed: int,
+    skipped: int,
+    faces_found: int,
+    start_time: float,
+    model: str
+):
+    """Write real-time progress, speed, and time estimates to a JSON file."""
+    try:
+        elapsed = time.time() - start_time
+        processed_this_run = success + failed
+        
+        # Calculate speed (seconds per file processed in this run)
+        speed = 0.0
+        if processed_this_run > 0:
+            speed = elapsed / processed_this_run
+            
+        remaining_files = total_files - (skipped + success + failed)
+        if remaining_files < 0:
+            remaining_files = 0
+            
+        est_remaining_seconds = remaining_files * speed
+        
+        state = {
+            "status": "running",
+            "model": model,
+            "total_files": total_files,
+            "processed_files_all_time": skipped + success + failed,
+            "processed_this_run": processed_this_run,
+            "skipped_this_run": skipped,
+            "success_this_run": success,
+            "failed_this_run": failed,
+            "faces_found": faces_found,
+            "current_file_name": current_file_name,
+            "speed_seconds_per_file": round(speed, 2) if speed > 0 else None,
+            "elapsed_seconds": int(elapsed),
+            "estimated_remaining_seconds": int(est_remaining_seconds) if speed > 0 else None,
+            "last_update": time.time()
+        }
+        
+        state_file = output_folder / "preprocessor_state.json"
+        import json
+        state_file.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception as e:
+        log.warning(f"Failed to update preprocessor state file: {e}")
+
+
 def run_drive_preprocess(output_folder: Path, resume: bool, limit_photos: int = None, limit_videos: int = None, model: str = "cnn"):
     start_time = time.time()
     last_whatsapp_time = start_time
@@ -193,7 +245,7 @@ def run_drive_preprocess(output_folder: Path, resume: bool, limit_photos: int = 
     TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
     with open(progress_log, "a", encoding="utf-8") as log_file:
-        for file in tqdm(filtered_files, desc="Processing Drive Files", unit="file"):
+        for idx, file in enumerate(tqdm(filtered_files, desc="Processing Drive Files", unit="file")):
             file_id = file["id"]
             file_name = file["name"]
 
@@ -270,6 +322,21 @@ def run_drive_preprocess(output_folder: Path, resume: bool, limit_photos: int = 
                 # Clean up local temp file immediately to save disk space
                 if temp_path.exists():
                     temp_path.unlink()
+                
+                # Update preprocessor real-time state JSON file
+                faces_found = sum(r.get("face_count", 0) for r in all_results) if 'all_results' in locals() else 0
+                update_preprocessor_state(
+                    output_folder=output_folder,
+                    current_index=idx,
+                    total_files=len(filtered_files),
+                    current_file_name=file_name,
+                    success=success,
+                    failed=failed,
+                    skipped=skipped,
+                    faces_found=faces_found,
+                    start_time=start_time,
+                    model=model
+                )
 
             # Save checkpoint every 25 files
             if (success + failed) % 25 == 0:
@@ -323,6 +390,18 @@ def run_drive_preprocess(output_folder: Path, resume: bool, limit_photos: int = 
         f"Processed: {success} files\n"
         f"Failed: {failed} files"
     )
+
+    # Mark real-time state as stopped
+    try:
+        state_file = output_folder / "preprocessor_state.json"
+        if state_file.exists():
+            import json
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            state["status"] = "stopped"
+            state["last_update"] = time.time()
+            state_file.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":
