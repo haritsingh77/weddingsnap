@@ -226,6 +226,10 @@ export default function Gallery() {
     const [total, setTotal] = useState(0)
     const [tab, setTab] = useState('all')  // all | mine | common | people
     
+    // Family Profile states
+    const [familyMembers, setFamilyMembers] = useState([])
+    const [activeFamilyMemberId, setActiveFamilyMemberId] = useState(null) // null = Master Family Album
+    
     // Face Clustering states
     const [clusters, setClusters] = useState([])
     const [loadingClusters, setLoadingClusters] = useState(false)
@@ -294,7 +298,12 @@ export default function Gallery() {
             const res = tab === 'all'
                 ? await getAllPhotos(p)
                 : await getPhotos(guestId, p)
-            const { photos: newPhotos, has_more, total: totalPhotos } = res.data
+            const { photos: newPhotos, has_more, total: totalPhotos, family_members: fetchedFamilyMembers } = res.data
+            if (fetchedFamilyMembers) {
+                setFamilyMembers(fetchedFamilyMembers)
+            } else {
+                setFamilyMembers([])
+            }
             setPhotos(prev => {
                 const combined = p === 1 ? newPhotos : [...prev, ...newPhotos]
                 const seen = new Set()
@@ -354,6 +363,9 @@ export default function Gallery() {
         : selectedCategory
         ? categoryPhotos
         : photos.filter(p => {
+            if (activeFamilyMemberId) {
+                return p.member_ids && p.member_ids.includes(activeFamilyMemberId)
+            }
             if (tab === 'mine') return !p.is_common
             if (tab === 'common') return p.is_common
             return true
@@ -854,6 +866,7 @@ export default function Gallery() {
                                 setSelectedCategory(null)
                                 setIsMultiSelectMode(false)
                                 setSelectedPhotos([])
+                                setActiveFamilyMemberId(null)
                             }}
                             className={`text-xs uppercase tracking-widest font-semibold pb-1.5 border-b-2 transition-all duration-300 cursor-pointer ${tab === t
                                     ? 'border-gold-500 text-stone-900'
@@ -1466,6 +1479,57 @@ export default function Gallery() {
                                         </div>
                                     </div>
                                 )}
+                            </div>
+                        )}
+
+                        {/* Family Navigation Pill Bar */}
+                        {familyMembers.length > 0 && tab === 'mine' && !selectedCluster && !selectedCategory && (
+                            <div className="mb-6 p-4 bg-white/40 backdrop-blur-md border border-stone-200/40 rounded-2xl shadow-sm">
+                                <h3 className="text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-3 px-1 flex items-center gap-1.5">
+                                    <span>👨‍👩‍👧‍👦</span> Household Members
+                                </h3>
+                                <div className="flex gap-2.5 overflow-x-auto py-1 scrollbar-none snap-x snap-mandatory">
+                                    {/* Master Family Album Pill */}
+                                    <button
+                                        onClick={() => setActiveFamilyMemberId(null)}
+                                        className={`snap-start flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold tracking-wide transition-all duration-300 shadow-xs cursor-pointer ${
+                                            activeFamilyMemberId === null
+                                                ? 'bg-stone-900 text-white shadow-md shadow-stone-900/10'
+                                                : 'bg-white/70 text-stone-600 hover:bg-white hover:text-stone-900 border border-stone-200/40'
+                                        }`}
+                                    >
+                                        <span className="text-sm">👨‍👩‍👧‍👦</span>
+                                        <span>Family Album</span>
+                                    </button>
+
+                                    {/* Individual Member Pills */}
+                                    {familyMembers.map((member) => {
+                                        const isActive = activeFamilyMemberId === member.id;
+                                        return (
+                                            <button
+                                                key={member.id}
+                                                onClick={() => setActiveFamilyMemberId(member.id)}
+                                                className={`snap-start flex items-center gap-2.5 px-3.5 py-2 rounded-xl text-xs font-semibold tracking-wide transition-all duration-300 shadow-xs cursor-pointer ${
+                                                    isActive
+                                                        ? 'bg-gold-500 text-white shadow-md shadow-gold-500/15'
+                                                        : 'bg-white/70 text-stone-600 hover:bg-white hover:text-stone-900 border border-stone-200/40'
+                                                }`}
+                                            >
+                                                <div className="w-5 h-5 rounded-full overflow-hidden border border-stone-200 bg-stone-100 flex-shrink-0 flex items-center justify-center">
+                                                    <img
+                                                        src={`${API_BASE}/faces/members/${member.id}/selfie`}
+                                                        alt={member.name}
+                                                        className="w-full h-full object-cover"
+                                                        onError={(e) => {
+                                                            e.target.style.display = 'none';
+                                                        }}
+                                                    />
+                                                </div>
+                                                <span>{member.name}</span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
                             </div>
                         )}
                         

@@ -9,7 +9,10 @@ import {
   adminRunGuestMatching,
   adminRunMatchingAll,
   adminDeleteGuest,
-  adminUpdateGuest
+  adminUpdateGuest,
+  adminGetFamilyMembers,
+  adminAddFamilyMember,
+  adminDeleteFamilyMember
 } from '../services/api'
 
 const API_BASE = import.meta.env.VITE_API_URL || 
@@ -43,7 +46,7 @@ export default function Admin() {
   const [reviewPhotos, setReviewPhotos] = useState([])
   const [loadingPhotos, setLoadingPhotos] = useState(false)
   const [lightboxIndex, setLightboxIndex] = useState(null)
-  const [tolerance, setTolerance] = useState(0.55)
+  const [tolerance, setTolerance] = useState(0.45)
 
   // Edit Guest Modal state
   const [editingGuest, setEditingGuest] = useState(null)
@@ -53,6 +56,16 @@ export default function Admin() {
   const [editSelfiePreview, setEditSelfiePreview] = useState(null)
   const [updatingGuest, setUpdatingGuest] = useState(false)
   const [editMessage, setEditMessage] = useState('')
+
+  // Manage Family Modal state
+  const [selectedFamilyGuest, setSelectedFamilyGuest] = useState(null)
+  const [familyMembers, setFamilyMembers] = useState([])
+  const [loadingFamily, setLoadingFamily] = useState(false)
+  const [newMemberName, setNewMemberName] = useState('')
+  const [memberSelfieFile, setMemberSelfieFile] = useState(null)
+  const [memberSelfiePreview, setMemberSelfiePreview] = useState(null)
+  const [addingMember, setAddingMember] = useState(false)
+  const [familyMessage, setFamilyMessage] = useState('')
 
   // Auto-authenticate if password already stored
   useEffect(() => {
@@ -232,6 +245,66 @@ export default function Admin() {
       setEditMessage('Failed to update guest. Ensure the server is online.')
     } finally {
       setUpdatingGuest(false)
+    }
+  }
+
+  const handleOpenFamily = async (guest) => {
+    setSelectedFamilyGuest(guest)
+    setFamilyMembers([])
+    setNewMemberName('')
+    setMemberSelfieFile(null)
+    setMemberSelfiePreview(null)
+    setFamilyMessage('')
+    setLoadingFamily(true)
+    try {
+      const res = await adminGetFamilyMembers(guest.id)
+      setFamilyMembers(res.data || [])
+    } catch (err) {
+      console.error("Failed to load family members:", err)
+    } finally {
+      setLoadingFamily(false)
+    }
+  }
+
+  const handleAddFamilyMemberSubmit = async (e) => {
+    e.preventDefault()
+    if (!newMemberName.trim() || !selectedFamilyGuest) return
+    setAddingMember(true)
+    setFamilyMessage('')
+    try {
+      const res = await adminAddFamilyMember(selectedFamilyGuest.id, newMemberName.trim(), memberSelfieFile)
+      setFamilyMessage(`Member "${res.data.name}" added successfully!`)
+      setNewMemberName('')
+      setMemberSelfieFile(null)
+      setMemberSelfiePreview(null)
+      
+      // Refresh family members list
+      const listRes = await adminGetFamilyMembers(selectedFamilyGuest.id)
+      setFamilyMembers(listRes.data || [])
+      
+      // Refresh main guest list counts
+      fetchGuestsList()
+    } catch (err) {
+      console.error("Failed to add family member:", err)
+      setFamilyMessage('Failed to add member. Please try again.')
+    } finally {
+      setAddingMember(false)
+    }
+  }
+
+  const handleDeleteFamilyMember = async (memberId, name) => {
+    if (!window.confirm(`Are you sure you want to remove family member "${name}"? This deletes their portrait and photo mappings.`)) {
+      return
+    }
+    try {
+      await adminDeleteFamilyMember(memberId)
+      setFamilyMembers(prev => prev.filter(m => m.id !== memberId))
+      
+      // Refresh main guest list counts
+      fetchGuestsList()
+    } catch (err) {
+      console.error("Failed to delete family member:", err)
+      alert("Failed to delete family member.")
     }
   }
 
@@ -466,6 +539,13 @@ export default function Admin() {
                           </span>
                         </td>
                         <td className="px-6 py-4 text-right space-x-2">
+                          <button
+                            onClick={() => handleOpenFamily(guest)}
+                            className="text-stone-700 hover:text-stone-900 text-xs font-semibold bg-stone-100 hover:bg-stone-200 px-3 py-1.5 rounded-lg cursor-pointer"
+                            title="Manage Family Members"
+                          >
+                            👨‍👩‍👧‍👦 Family
+                          </button>
                           <button
                             onClick={() => handleOpenReview(guest)}
                             className="text-stone-700 hover:text-stone-900 text-xs font-semibold bg-stone-100 hover:bg-stone-200 px-3 py-1.5 rounded-lg cursor-pointer"
@@ -725,6 +805,129 @@ export default function Admin() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Manage Family Modal Overlay */}
+      {selectedFamilyGuest && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl border border-stone-200 animate-fade-in-up">
+            <div className="px-6 py-4 border-b border-stone-100 flex items-center justify-between">
+              <div>
+                <h3 className="font-serif text-lg text-stone-900 leading-none mb-1">Manage Household</h3>
+                <p className="text-stone-400 text-xs">Family card: <span className="font-semibold text-stone-750">{selectedFamilyGuest.name}</span></p>
+              </div>
+              <button
+                onClick={() => setSelectedFamilyGuest(null)}
+                className="text-stone-400 hover:text-stone-700 font-bold text-xl cursor-pointer"
+              >
+                &times;
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              {/* Existing Family Members List */}
+              <div>
+                <h4 className="text-xs font-bold text-stone-500 uppercase tracking-wider mb-3">Family Members</h4>
+                {loadingFamily ? (
+                  <div className="text-center py-4 text-stone-400 text-xs">Loading family list...</div>
+                ) : familyMembers.length === 0 ? (
+                  <div className="text-center py-5 text-stone-400 text-xs bg-stone-50/55 rounded-2xl border border-dashed border-stone-200 p-4">
+                    No other family members registered yet. Add one below!
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {familyMembers.map(member => (
+                      <div key={member.id} className="flex items-center justify-between p-3 bg-stone-50/50 rounded-2xl border border-stone-150/40 hover:bg-stone-100/50 transition duration-200">
+                        <div className="flex items-center gap-3">
+                          <img
+                            src={`${API_BASE}/admin/members/${member.id}/selfie?password=${localStorage.getItem('admin_password')}`}
+                            alt={member.name}
+                            className="w-10 h-10 rounded-full object-cover border border-stone-200/80 bg-white"
+                            onError={(e) => { e.target.src = '/logo.png' }}
+                          />
+                          <span className="text-sm font-semibold text-stone-850">{member.name}</span>
+                        </div>
+                        <button
+                          onClick={() => handleDeleteFamilyMember(member.id, member.name)}
+                          className="text-red-400 hover:text-red-600 text-sm p-2 hover:bg-white rounded-xl transition cursor-pointer"
+                          title="Remove family member"
+                        >
+                          🗑
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Add Family Member Form */}
+              <div className="border-t border-stone-100 pt-4">
+                <h4 className="text-xs font-bold text-stone-500 uppercase tracking-wider mb-3">Add Family Member</h4>
+                <form onSubmit={handleAddFamilyMemberSubmit} className="space-y-4 bg-stone-50/30 p-4 rounded-2xl border border-stone-150/55">
+                  <div>
+                    <label className="block text-[10px] font-bold text-stone-400 uppercase tracking-wider mb-1">Member Name</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Susan Miller"
+                      value={newMemberName}
+                      onChange={(e) => setNewMemberName(e.target.value)}
+                      className="w-full px-4 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:border-stone-400 text-stone-800 text-xs font-medium"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-stone-400 uppercase tracking-wider mb-1">Reference Portrait (Selfie)</label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => {
+                        const file = e.target.files[0]
+                        if (file) {
+                          setMemberSelfieFile(file)
+                          setMemberSelfiePreview(URL.createObjectURL(file))
+                        }
+                      }}
+                      className="hidden"
+                      id="member-selfie-upload"
+                    />
+                    <label
+                      htmlFor="member-selfie-upload"
+                      className="block w-full border border-dashed border-stone-200 hover:border-stone-400 rounded-xl p-4 text-center cursor-pointer transition bg-white"
+                    >
+                      {memberSelfiePreview ? (
+                        <img
+                          src={memberSelfiePreview}
+                          alt="Preview"
+                          className="w-14 h-14 object-cover mx-auto rounded-full border border-stone-200"
+                        />
+                      ) : (
+                        <div className="text-stone-450 space-y-0.5 py-1">
+                          <p className="text-[10px] font-semibold text-stone-600">Select Portrait Photo</p>
+                          <p className="text-[8px] text-stone-400">Clear close-up portrait for maximum accuracy</p>
+                        </div>
+                      )}
+                    </label>
+                  </div>
+
+                  {familyMessage && (
+                    <p className="text-stone-600 text-xs font-semibold text-center mt-1">
+                      {familyMessage}
+                    </p>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={addingMember}
+                    className="w-full bg-stone-900 hover:bg-stone-800 text-white font-semibold py-2.5 rounded-xl transition duration-200 text-xs uppercase tracking-wider disabled:bg-stone-300 cursor-pointer"
+                  >
+                    {addingMember ? 'Matching & Syncing...' : 'Add Family Member'}
+                  </button>
+                </form>
+              </div>
+            </div>
           </div>
         </div>
       )}

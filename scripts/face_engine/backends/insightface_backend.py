@@ -76,11 +76,19 @@ class InsightFaceBackend(FaceBackend):
                 continue
             bbox = face.bbox.astype(int)
             left, top, right, bottom = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
+            
+            # ── Filter out small background faces & low-score detections ──────
+            width = right - left
+            height = bottom - top
+            score = float(getattr(face, "det_score", 1.0))
+            if score < 0.65 or width < 75 or height < 75:
+                continue
+
             detections.append(
                 FaceDetection(
                     bbox=(left, top, right, bottom),
                     encoding=np.asarray(face.embedding, dtype=np.float32),
-                    det_score=float(getattr(face, "det_score", 1.0)),
+                    det_score=score,
                 )
             )
         return detections

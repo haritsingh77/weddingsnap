@@ -108,7 +108,7 @@ def encode_selfie(image_bytes: bytes) -> Optional[np.ndarray]:
         if len(locations) > 1:
             largest = max(locations, key=lambda loc: (loc[2] - loc[0]) * (loc[1] - loc[3]))
             locations = [largest]
-        encodings = face_recognition.face_encodings(img_array, locations, num_jitters=3)
+        encodings = face_recognition.face_encodings(img_array, locations, num_jitters=20)
         return encodings[0] if encodings else None
 
     except Exception as e:

@@ -483,3 +483,146 @@ def get_guest_selfie(
         raise HTTPException(status_code=404, detail="Selfie not found")
 
     return Response(content=selfie_data, media_type="image/jpeg")
+
+
+# ── Family Members Management Endpoints ─────────────────────────────────────
+
+@router.get("/guests/{guest_id}/members")
+def get_family_members(guest_id: str, x_admin_password: str = Header(..., alias="x-admin-password")):
+    """Get all family members for a specific guest/household."""
+    if x_admin_password != settings.ADMIN_PASSWORD:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        res = supabase.table("family_members").select("*").eq("guest_id", guest_id).order("name").execute()
+        return res.data or []
+    except Exception as e:
+        log.error(f"Error fetching family members for guest {guest_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/guests/{guest_id}/members")
+async def add_family_member(
+    guest_id: str,
+    name: str = Form(...),
+    selfie: UploadFile = File(None),
+    x_admin_password: str = Header(..., alias="x-admin-password")
+):
+    """Add a new family member to a household, cache their portrait, and run face matching."""
+    if x_admin_password != settings.ADMIN_PASSWORD:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        # 1. Verify guest exists
+        guest_check = supabase.table("guests").select("id").eq("id", guest_id).execute()
+        if not guest_check.data:
+            raise HTTPException(status_code=404, detail="Guest household not found.")
+
+        # 2. Create family member record
+        member_payload = {
+            "guest_id": guest_id,
+            "name": name.strip()
+        }
+        res = supabase.table("family_members").insert(member_payload).execute()
+        if not res.data:
+            raise HTTPException(status_code=500, detail="Failed to create family member in database.")
+        
+        new_member = res.data[0]
+        member_id = new_member["id"]
+
+        # 3. Process selfie if provided
+        if selfie:
+            selfie_bytes = await selfie.read()
+            if len(selfie_bytes) > 0:
+                # Save to persistent Supabase Storage cache as selfie_member_{member_id}.jpg
+                from app.services.drive_cache import save_cached_file
+                save_cached_file(f"selfie_member_{member_id}.jpg", selfie_bytes)
+
+                # Auto-name cluster using the member name
+                try:
+                    from app.routes.faces import auto_name_cluster_for_guest
+                    auto_name_cluster_for_guest(name.strip(), selfie_bytes)
+                except Exception as auto_name_err:
+                    log.warning(f"Could not auto-name cluster for member: {auto_name_err}")
+
+                # Run face matching
+                match_result = match_guest_selfie(selfie_bytes)
+                if match_result.get("success", True):
+                    personal_ids = resolve_drive_ids(match_result["personal_photos"])
+                    common_ids = resolve_drive_ids(match_result["common_photos"])
+
+                    # Save matches to photos
+                    unique_photos = {}
+                    for drive_id in personal_ids:
+                        if drive_id:
+                            unique_photos[drive_id] = {"drive_path": drive_id, "is_common": False, "face_count": 1}
+                    for drive_id in common_ids:
+                        if drive_id:
+                            unique_photos[drive_id] = {"drive_path": drive_id, "is_common": True, "face_count": 4}
+
+                    photos_to_upsert = list(unique_photos.values())
+                    if photos_to_upsert:
+                        upserted = supabase.table("photos").upsert(photos_to_upsert, on_conflict="drive_path").execute()
+                        if upserted.data:
+                            drive_to_id = {p["drive_path"]: p["id"] for p in upserted.data}
+                            
+                            # Build mappings for member_photos and guest_photos
+                            member_photo_rows = []
+                            guest_photo_rows = []
+                            seen_photo_ids = set()
+                            
+                            for drive_id in list(personal_ids) + list(common_ids):
+                                pid = drive_to_id.get(drive_id)
+                                if pid and pid not in seen_photo_ids:
+                                    seen_photo_ids.add(pid)
+                                    member_photo_rows.append({"member_id": member_id, "photo_id": pid})
+                                    guest_photo_rows.append({"guest_id": guest_id, "photo_id": pid})
+                            
+                            if member_photo_rows:
+                                supabase.table("member_photos").upsert(member_photo_rows, on_conflict="member_id,photo_id").execute()
+                            if guest_photo_rows:
+                                supabase.table("guest_photos").upsert(guest_photo_rows, on_conflict="guest_id,photo_id").execute()
+
+        return new_member
+    except Exception as e:
+        log.error(f"Error adding family member: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/members/{member_id}")
+def delete_family_member(member_id: str, x_admin_password: str = Header(..., alias="x-admin-password")):
+    """Delete a family member, cascade-delete their photo mappings, and delete their cached selfie."""
+    if x_admin_password != settings.ADMIN_PASSWORD:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        # Delete from family_members (cascade deletes member_photos in database)
+        supabase.table("family_members").delete().eq("id", member_id).execute()
+
+        # Delete cached selfie file
+        from app.services.drive_cache import delete_cached_file
+        try:
+            delete_cached_file(f"selfie_member_{member_id}.jpg")
+        except Exception as e:
+            log.warning(f"Could not delete cached selfie for member {member_id}: {e}")
+
+        return {"success": True, "message": "Family member deleted successfully."}
+    except Exception as e:
+        log.error(f"Error deleting family member {member_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/members/{member_id}/selfie")
+def get_family_member_selfie(
+    member_id: str,
+    x_admin_password: str = Header(None, alias="x-admin-password"),
+    password: str = None
+):
+    """Retrieve the reference portrait image for a family member."""
+    token = x_admin_password or password
+    if token != settings.ADMIN_PASSWORD:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    from app.services.drive_cache import get_cached_file
+    selfie_data = get_cached_file(f"selfie_member_{member_id}.jpg")
+    if not selfie_data:
+        raise HTTPException(status_code=404, detail="Selfie not found")
+
+    return Response(content=selfie_data, media_type="image/jpeg")

@@ -270,6 +270,7 @@ def _cluster_faces_scalable(X: np.ndarray, threshold: float, backend: str) -> np
 
     # dlib / fallback: DBSCAN with dimensionality reduction when large
     from sklearn.decomposition import PCA
+    from sklearn.cluster import DBSCAN
 
     X_f = X.astype(np.float32)
     if n > 5000 and d > 64:
@@ -829,6 +830,17 @@ def get_guest_selfie_public(guest_id: str):
     if not selfie_data:
         raise HTTPException(status_code=404, detail="Selfie not found")
     return Response(content=selfie_data, media_type="image/jpeg")
+
+
+@router.get("/members/{member_id}/selfie")
+def get_member_selfie_public(member_id: str):
+    """Public endpoint to serve family member reference selfies without admin password for gallery views."""
+    from app.services.drive_cache import get_cached_file
+    selfie_data = get_cached_file(f"selfie_member_{member_id}.jpg")
+    if not selfie_data:
+        raise HTTPException(status_code=404, detail="Selfie not found")
+    return Response(content=selfie_data, media_type="image/jpeg")
+
 
 
 @router.get("/clusters/{cluster_id}/thumbnail")

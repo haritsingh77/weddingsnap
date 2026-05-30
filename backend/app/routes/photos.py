@@ -87,23 +87,30 @@ async def thumb_photo(file_id: str, size: int = 400):
     """
     Returns thumbnail of photo/video.
     Cache hierarchy:
-      1. Local /tmp (L1, fast, ephemeral)
-      2. Google Drive cache folder (persistent across deployments)
-      3. Generate from Google Drive CDN thumbnail link → save to Drive cache
+      1. Local L1 disk cache (fast, ephemeral)
+      2. Redirect directly to Supabase global CDN (Cloudflare) to bypass server proxy bottleneck
     """
-    from app.services.drive_cache import get_cached_file, save_cached_file
+    from app.services.drive_cache import LOCAL_CACHE_DIR
     size = min(size, 2048)
     cache_key = f"thumb_{file_id}_{size}.jpg"
 
-    # ── 1. L1 + Drive cache lookup ────────────────────────────────────────────
-    cached = get_cached_file(cache_key)
-    if cached:
-        from fastapi.responses import Response
-        return Response(
-            content=cached,
-            media_type="image/jpeg",
-            headers={"Cache-Control": "private, max-age=86400"},
-        )
+    # ── 1. Check local L1 disk cache first (instant) ──────────────────────────
+    local_path = LOCAL_CACHE_DIR / cache_key
+    if local_path.exists():
+        try:
+            from fastapi.responses import Response
+            return Response(
+                content=local_path.read_bytes(),
+                media_type="image/jpeg",
+                headers={"Cache-Control": "private, max-age=86400"},
+            )
+        except Exception:
+            pass
+
+    # ── 2. Bypasses proxy bottleneck: Redirect browser directly to Supabase CDN ──
+    from fastapi.responses import RedirectResponse
+    cdn_url = f"{settings.SUPABASE_URL}/storage/v1/object/public/weddingsnap-cache/{cache_key}"
+    return RedirectResponse(url=cdn_url, status_code=307)
 
     # ── 2. Generate from Google Drive CDN thumbnail link ──────────────────────
     try:
@@ -600,31 +607,30 @@ def get_people_in_photo(drive_id: str):
 @router.get("/{guest_id}")
 async def get_guest_photos(guest_id: str, page: int = 1, limit: int = 50):
     """
-    Returns paginated list of Drive file IDs for a guest, with video indicators.
-    Includes both personal matching photos and common/group photos.
+    Returns paginated list of Drive file IDs for a guest household, with video indicators.
+    Includes personal matching photos for all family members and common/group photos.
+    Supports nested family member metadata for custom gallery views.
     """
     guest = supabase.table("guests").select("id, name").eq("id", guest_id).execute()
     if not guest.data:
         raise HTTPException(status_code=404, detail="Guest not found")
 
     # Dynamically associate named face clusters with guest if name matches.
-    # Guard: only do this once per guest per server restart — get_face_clusters()
-    # runs Agglomerative Clustering on all face encodings which is very expensive.
     if guest_id not in _associated_guests:
         try:
             from app.services.face_service import associate_guest_by_name
             associated = associate_guest_by_name(guest_id, guest.data[0].get("name", ""))
-            if associated >= 0:  # mark even if 0 — cluster may not be named yet
+            if associated >= 0:
                 _associated_guests.add(guest_id)
                 if associated > 0:
-                    log.info(f"Auto-associated {associated} photos for guest '{guest.data[0].get('name')}' via cluster name match.")
+                    log.info(f"Auto-associated {associated} photos for guest '{guest.data[0].get('name')}' via name match.")
         except Exception as association_err:
-            log.error(f"Failed to dynamically associate guest name with face clusters: {association_err}")
-            _associated_guests.add(guest_id)  # don't retry on error
+            log.error(f"Failed to dynamically associate guest name: {association_err}")
+            _associated_guests.add(guest_id)
 
     offset = (page - 1) * limit
 
-    # 1. Fetch personal photo IDs from guest_photos mapping table
+    # 1. Fetch personal photo IDs from guest_photos mapping table (aggregate family album)
     gp_res = supabase.table("guest_photos").select("photo_id").eq("guest_id", guest_id).execute()
     personal_ids = [str(row["photo_id"]) for row in gp_res.data] if (gp_res.data and len(gp_res.data) > 0) else []
 
@@ -649,6 +655,34 @@ async def get_guest_photos(guest_id: str, page: int = 1, limit: int = 50):
             .range(offset, offset + limit - 1)\
             .execute()
 
+    # 3. Fetch family members registered under this guest/household
+    try:
+        members_res = supabase.table("family_members").select("id, name").eq("guest_id", guest_id).order("name").execute()
+        family_members = members_res.data or []
+    except Exception as e:
+        log.error(f"Error fetching family members in get_guest_photos: {e}")
+        family_members = []
+
+    # 4. Map which photo belongs to which family member(s)
+    photo_to_members = {}
+    if family_members:
+        member_ids = [m["id"] for m in family_members]
+        try:
+            m_photos = supabase.table("member_photos").select("member_id, photo_id, photos(drive_path)").in_("member_id", member_ids).execute()
+            if m_photos.data:
+                for row in m_photos.data:
+                    m_id = row["member_id"]
+                    photo_data = row.get("photos", {})
+                    if photo_data:
+                        drive_path = photo_data.get("drive_path")
+                        if drive_path:
+                            if drive_path not in photo_to_members:
+                                photo_to_members[drive_path] = []
+                            if m_id not in photo_to_members[drive_path]:
+                                photo_to_members[drive_path].append(m_id)
+        except Exception as e:
+            log.error(f"Error mapping member photos in get_guest_photos: {e}")
+
     mime_map = get_drive_id_to_mime_map()
     photos = []
 
@@ -660,15 +694,14 @@ async def get_guest_photos(guest_id: str, page: int = 1, limit: int = 50):
         mime_type = mime_map.get(drive_id, "image/jpeg")
         is_video = mime_type.startswith("video/")
 
-        # thumb_url → small resized JPEG (fast for grid)
-        # stream_url → full-res original (used in lightbox)
         photos.append({
             "drive_id": drive_id,
             "is_common": photo.get("is_common", False),
             "thumb_url": f"/photos/thumb/{drive_id}",
             "stream_url": f"/photos/stream/{drive_id}",
             "is_video": is_video,
-            "mime_type": mime_type
+            "mime_type": mime_type,
+            "member_ids": photo_to_members.get(drive_id, [])
         })
 
     return {
@@ -676,7 +709,8 @@ async def get_guest_photos(guest_id: str, page: int = 1, limit: int = 50):
         "page": page,
         "limit": limit,
         "total": total_count,
-        "has_more": offset + limit < total_count
+        "has_more": offset + limit < total_count,
+        "family_members": family_members
     }
 
 

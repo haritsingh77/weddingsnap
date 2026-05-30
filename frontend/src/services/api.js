@@ -159,6 +159,21 @@ export const uploadClusterProfilePic = (clusterId, file) => {
   return api.post(`/faces/clusters/${clusterId}/upload-profile-pic`, form)
 }
 
+export const adminGetFamilyMembers = (guestId) =>
+  api.get(`/admin/guests/${guestId}/members`)
+
+export const adminAddFamilyMember = (guestId, name, selfieFile) => {
+  const form = new FormData()
+  form.append('name', name)
+  if (selfieFile) {
+    form.append('selfie', selfieFile)
+  }
+  return api.post(`/admin/guests/${guestId}/members`, form)
+}
+
+export const adminDeleteFamilyMember = (memberId) =>
+  api.delete(`/admin/members/${memberId}`)
+
 export const notMePhoto = (driveId, guestId) =>
   api.post(`/photos/${driveId}/not-me`, { guest_id: guestId })
 
