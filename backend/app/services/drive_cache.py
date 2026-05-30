@@ -19,8 +19,19 @@ from app.database import supabase
 
 log = logging.getLogger(__name__)
 
-# ── Local L1 ephemeral cache ──────────────────────────────────────────────────
-LOCAL_CACHE_DIR = Path("/tmp/weddingsnap_cache")
+# ── Local L1 ephemeral cache (prefer SSD on Windows) ─────────────────────────
+def _local_cache_dir() -> Path:
+    import os
+    import platform
+    ssd = os.getenv("WEDDINGSNAP_SSD_ROOT", "").strip()
+    if ssd:
+        return Path(ssd) / "api_cache"
+    if platform.system() == "Windows":
+        return Path(os.getenv("LOCALAPPDATA", ".")) / "weddingsnap" / "api_cache"
+    return Path("/tmp/weddingsnap_cache")
+
+
+LOCAL_CACHE_DIR = _local_cache_dir()
 LOCAL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 BUCKET_NAME = "weddingsnap-cache"
@@ -74,19 +85,39 @@ def save_cached_file(filename: str, data: bytes, mime_type: str = "image/jpeg"):
     except Exception as e:
         log.warning(f"Failed to write L1 cache for '{filename}': {e}")
 
-    try:
-        supabase.storage.from_(BUCKET_NAME).upload(
-            path=filename,
-            file=data,
-            file_options={
-                "cache-control": "3600",
-                "upsert": "true",
-                "content-type": mime_type
-            }
-        )
-        log.debug(f"Saved '{filename}' to Supabase Storage")
-    except Exception as e:
-        log.error(f"Failed to upload '{filename}' to Supabase Storage: {e}")
+    is_thumbnail = filename.startswith("thumb_") or filename.startswith("face_cluster_")
+
+    if is_thumbnail:
+        import threading
+        def _upload():
+            try:
+                supabase.storage.from_(BUCKET_NAME).upload(
+                    path=filename,
+                    file=data,
+                    file_options={
+                        "cache-control": "3600",
+                        "upsert": "true",
+                        "content-type": mime_type
+                    }
+                )
+                log.debug(f"Saved '{filename}' to Supabase Storage in background")
+            except Exception as upload_err:
+                log.error(f"Failed to upload '{filename}' to Supabase Storage in background: {upload_err}")
+        threading.Thread(target=_upload, daemon=True).start()
+    else:
+        try:
+            supabase.storage.from_(BUCKET_NAME).upload(
+                path=filename,
+                file=data,
+                file_options={
+                    "cache-control": "3600",
+                    "upsert": "true",
+                    "content-type": mime_type
+                }
+            )
+            log.debug(f"Saved '{filename}' to Supabase Storage")
+        except Exception as e:
+            log.error(f"Failed to upload '{filename}' to Supabase Storage: {e}")
 
 
 def delete_cached_file(filename: str):

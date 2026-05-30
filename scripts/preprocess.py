@@ -7,6 +7,11 @@ Usage:
 
     OR just run without arguments for interactive mode:
     python scripts/preprocess.py
+
+GPU-optimized (InsightFace + ONNX CUDA on Windows):
+    set WEDDINGSNAP_SSD_ROOT=D:\weddingsnap_cache
+    set FACE_BACKEND=insightface
+    python scripts/preprocess.py --input D:\photos --output backend/encodings --resume
 """
 
 import os
@@ -14,16 +19,27 @@ import sys
 import pickle
 import argparse
 import logging
+import gc
+import time
 from pathlib import Path
-from typing import Optional, Union, List
+from typing import Optional
+
 from tqdm import tqdm
 
-import face_recognition
-import numpy as np
-from PIL import Image, ImageOps
-from sklearn.cluster import DBSCAN
+# Project root on path
+project_root = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(project_root))
 
-# ── Logging ───────────────────────────────────────────────────────────────────
+from scripts.face_engine.config import PreprocessConfig
+from scripts.face_engine.pipeline import (
+    FacePipeline,
+    SUPPORTED_EXTENSIONS,
+    SUPPORTED_VIDEO_EXTENSIONS,
+    get_pipeline,
+    sort_media_priority,
+)
+from scripts.face_engine.metrics import RunMetrics
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -34,59 +50,40 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-import cv2
-
-# ── Constants ─────────────────────────────────────────────────────────────────
-SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".heic", ".webp"}
-SUPPORTED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
-SUPPORTED_EXTENSIONS       = SUPPORTED_IMAGE_EXTENSIONS | SUPPORTED_VIDEO_EXTENSIONS
-GROUP_PHOTO_THRESHOLD      = 4      # 4+ faces → common photo
-MAX_IMAGE_SIZE             = 1200   # px — resize before processing for speed
-DBSCAN_EPS                 = 0.5    # face similarity tolerance
-DBSCAN_MIN_SAMPLES         = 2      # min photos to form a person cluster
-
-
-# ── Argument parsing ──────────────────────────────────────────────────────────
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="WeddingSnap Face Preprocessor")
 
-    parser.add_argument(
-        "--input", "-i",
-        type=str,
-        help="Path to folder containing wedding photos and videos",
-    )
-    parser.add_argument(
-        "--output", "-o",
-        type=str,
-        default="backend/encodings",
-        help="Where to save encodings (default: backend/encodings)",
-    )
-    parser.add_argument(
-        "--resume",
-        action="store_true",
-        help="Resume from previous run (skip already-processed files)",
-    )
+    parser.add_argument("--input", "-i", type=str, help="Path to folder containing wedding photos and videos")
+    parser.add_argument("--output", "-o", type=str, default="backend/encodings", help="Where to save encodings")
+    parser.add_argument("--resume", action="store_true", help="Resume from previous run")
     parser.add_argument(
         "--model",
         type=str,
         choices=["hog", "cnn"],
-        default="cnn",
-        help="Face detection model: 'hog' (fast, CPU) or 'cnn' (accurate, GPU/slow). Default: cnn",
+        default=None,
+        help="dlib model only (hog/cnn). Ignored when FACE_BACKEND=insightface",
     )
-
+    parser.add_argument(
+        "--backend",
+        type=str,
+        choices=["auto", "insightface", "dlib"],
+        default=None,
+        help="Face backend (default: env FACE_BACKEND or auto)",
+    )
+    parser.add_argument("--batch-size", type=int, default=None, help="Image batch size (default: 4)")
+    parser.add_argument("--ssd-root", type=str, default=None, help="SSD root for temp/model cache")
     return parser.parse_args()
 
 
 def prompt_for_folder() -> Path:
-    """Interactive fallback if --input not provided."""
     print("\n📁 WeddingSnap Preprocessor")
     print("=" * 40)
     print("Drag and drop your photos/videos folder into this terminal window,")
     print("or type the full path manually.\n")
 
     while True:
-        raw = input("📂 Target folder path: ").strip().strip("'\"")  # strip quotes from drag-drop
+        raw = input("📂 Target folder path: ").strip().strip("'\"")
         path = Path(raw).expanduser().resolve()
 
         if not path.exists():
@@ -96,11 +93,7 @@ def prompt_for_folder() -> Path:
             print(f"  ❌ That's a file, not a folder: {path}")
             continue
 
-        # Show a quick preview
-        photo_count = sum(
-            1 for f in path.rglob("*")
-            if f.suffix.lower() in SUPPORTED_EXTENSIONS
-        )
+        photo_count = sum(1 for f in path.rglob("*") if f.suffix.lower() in SUPPORTED_EXTENSIONS)
         print(f"\n  ✅ Found {photo_count:,} media files in: {path}")
         confirm = input("  Proceed with this folder? (y/n): ").strip().lower()
         if confirm == "y":
@@ -108,213 +101,148 @@ def prompt_for_folder() -> Path:
         print()
 
 
-# ── Image helpers ─────────────────────────────────────────────────────────────
-
-def get_all_photos(folder: Path) -> list[Path]:
-    photos = sorted(
-        f for f in folder.rglob("*")
-        if f.suffix.lower() in SUPPORTED_EXTENSIONS
-    )
-    return photos
+def get_all_media(folder: Path) -> list[Path]:
+    files = [f for f in folder.rglob("*") if f.suffix.lower() in SUPPORTED_EXTENSIONS]
+    return sort_media_priority(files)
 
 
-def load_and_resize(path: Path) -> Optional[np.ndarray]:
-    try:
-        img = Image.open(path).convert("RGB")
-        img = ImageOps.exif_transpose(img)  # fix phone rotation
-        w, h = img.size
-        if max(w, h) > MAX_IMAGE_SIZE:
-            scale = MAX_IMAGE_SIZE / max(w, h)
-            img = img.resize((int(w * scale), int(h * scale)), Image.Resampling.BILINEAR)
-        return np.array(img)
-    except Exception as e:
-        log.warning(f"Skipped {path.name}: {e}")
-        return None
-
-
-def encode_photo(path: Path, model: str = "cnn") -> Optional[dict]:
-    """Returns encoding data for one photo, or None if no faces found.
-    
-    Args:
-        path: Path to the image file.
-        model: 'hog' (fast) or 'cnn' (accurate, ~10x slower, recommended overnight).
-    """
-    img = load_and_resize(path)
-    if img is None:
-        return None
-
-    locations = face_recognition.face_locations(img, model=model)
-    if not locations:
-        return None
-
-    # CNN produces more accurate locations; use num_jitters=1 for speed
-    num_jitters = 1
-    encodings = face_recognition.face_encodings(img, locations, num_jitters=num_jitters)
-    face_count = len(locations)
-
-    common_keywords = {"venue", "decor", "ceremony", "stage", "mandap", "common"}
-    is_common = (
-        face_count >= GROUP_PHOTO_THRESHOLD or
-        any(kw in path.parent.name.lower() for kw in common_keywords)
-    )
-
-    return {
-        "path": str(path),
-        "locations": locations,       # one per face found (top, right, bottom, left)
-        "encodings": encodings,       # one per face found
-        "face_count": face_count,
-        "is_common": is_common,
-        "detection_model": model,     # record which model was used
-    }
-
-
-def encode_video(path: Path, model: str = "cnn") -> Optional[dict]:
-    """Extract face encodings from a video by sampling frames."""
-    try:
-        cap = cv2.VideoCapture(str(path))
-        if not cap.isOpened():
-            log.warning(f"Could not open video file: {path.name}")
-            return None
-
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        if fps <= 0 or total_frames <= 0:
-            cap.release()
-            return None
-
-        # Sample 1 frame per 3 seconds of video (more than enough for face recognition)
-        sample_interval = max(1, int(fps * 3))
-        unique_samples = []  # List of tuples: (location, encoding, frame_idx)
-        max_faces_in_frame = 0
-
-        frame_idx = 0
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-
-            # Only process every sample_interval frames
-            if frame_idx % sample_interval == 0:
-                # Convert BGR (OpenCV) to RGB
-                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                
-                # Resize for speed
-                h, w = rgb_frame.shape[:2]
-                if max(h, w) > MAX_IMAGE_SIZE:
-                    scale = MAX_IMAGE_SIZE / max(h, w)
-                    rgb_frame = cv2.resize(rgb_frame, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
-
-                # Detect faces in frame
-                locations = face_recognition.face_locations(rgb_frame, model=model)
-                if locations:
-                    max_faces_in_frame = max(max_faces_in_frame, len(locations))
-                    encodings = face_recognition.face_encodings(rgb_frame, locations)
-                    for loc, enc in zip(locations, encodings):
-                        # Avoid adding duplicate encodings of the same person
-                        if not unique_samples:
-                            unique_samples.append((loc, enc, frame_idx))
-                        else:
-                            existing_encs = [s[1] for s in unique_samples]
-                            distances = face_recognition.face_distance(existing_encs, enc)
-                            if not any(d < 0.5 for d in distances):
-                                unique_samples.append((loc, enc, frame_idx))
-
-            frame_idx += 1
-
-        cap.release()
-
-        if not unique_samples:
-            return None
-
-        common_keywords = {"venue", "decor", "ceremony", "stage", "mandap", "common"}
-        is_common = (
-            max_faces_in_frame >= GROUP_PHOTO_THRESHOLD or
-            any(kw in path.parent.name.lower() for kw in common_keywords)
-        )
-
-        return {
-            "path": str(path),
-            "locations": [s[0] for s in unique_samples],
-            "encodings": [s[1] for s in unique_samples],
-            "frame_indices": [s[2] for s in unique_samples],
-            "face_count": max_faces_in_frame,
-            "is_common": is_common,
-        }
-
-    except Exception as e:
-        log.error(f"Failed to encode video {path.name}: {e}")
-        return None
-
-
-# ── Main pipeline ─────────────────────────────────────────────────────────────
-
-def run(input_folder: Path, output_folder: Path, resume: bool, model: str = "cnn"):
+def run(input_folder: Path, output_folder: Path, resume: bool, config: PreprocessConfig):
+    pipeline = get_pipeline(config)
     output_folder.mkdir(parents=True, exist_ok=True)
-    cache_path   = output_folder / "face_encodings.pkl"
+    cache_path = output_folder / "face_encodings.pkl"
     progress_log = output_folder / "processed_files.txt"
 
-    # Load already-processed files if resuming
     processed = set()
     if resume and progress_log.exists():
-        processed = set(progress_log.read_text().splitlines())
-        log.info(f"Resuming — {len(processed):,} files already done")
+        processed = set(progress_log.read_text(encoding="utf-8").splitlines())
+        log.info("Resuming — %s files already done", f"{len(processed):,}")
 
-    photos = get_all_photos(input_folder)
-    log.info(f"Found {len(photos):,} media files in {input_folder}")
+    media_files = get_all_media(input_folder)
+    log.info("Found %s media files | backend=%s | batch=%d", f"{len(media_files):,}", pipeline.backend_name, config.batch_size)
 
-    # Load existing encodings if resuming
     all_results = []
     if resume and cache_path.exists():
         with open(cache_path, "rb") as f:
             all_results = pickle.load(f)
-        log.info(f"Loaded {len(all_results):,} existing encodings")
+        log.info("Loaded %s existing encodings", f"{len(all_results):,}")
+
+    metrics = RunMetrics(
+        total_files=len(media_files),
+        model=pipeline.model_label,
+        backend=pipeline.backend_name,
+    )
 
     skipped = failed = 0
+    batch_paths: list[Path] = []
+    file_counter = 0
 
-    with open(progress_log, "a") as log_file:
-        for media_file in tqdm(photos, desc="Scanning media files", unit="file"):
+    with open(progress_log, "a", encoding="utf-8") as log_file:
+        for media_file in tqdm(media_files, desc="Scanning media", unit="file"):
             if str(media_file) in processed:
                 skipped += 1
+                metrics.skipped = skipped
                 continue
 
-            suffix = media_file.suffix.lower()
-            if suffix in SUPPORTED_VIDEO_EXTENSIONS:
-                result = encode_video(media_file, model=model)
+            metrics.current_file = media_file.name
+            is_video = media_file.suffix.lower() in SUPPORTED_VIDEO_EXTENSIONS
+
+            if is_video:
+                if batch_paths:
+                    _flush_image_batch(pipeline, batch_paths, all_results, log_file, metrics, config)
+                    batch_paths = []
+                t0 = time.time()
+                result = pipeline.encode_video(media_file)
+                metrics.record_batch(1, time.time() - t0, result["face_count"] if result else 0)
+                if result:
+                    all_results.append(result)
+                    metrics.success += 1
+                else:
+                    failed += 1
+                    metrics.failed = failed
+                log_file.write(str(media_file) + "\n")
+                file_counter += 1
+                pipeline.maybe_gc(file_counter)
             else:
-                result = encode_photo(media_file, model=model)
+                batch_paths.append(media_file)
+                if len(batch_paths) >= config.batch_size:
+                    _flush_image_batch(pipeline, batch_paths, all_results, log_file, metrics, config)
+                    batch_paths = []
+                    file_counter += config.batch_size
+                    pipeline.maybe_gc(file_counter)
 
-            if result:
-                all_results.append(result)
-            else:
-                failed += 1
-
-            # Mark as processed
-            log_file.write(str(media_file) + "\n")
-
-            # Save checkpoint every 500 photos
-            if len(all_results) % 500 == 0:
+            if len(all_results) > 0 and len(all_results) % 500 == 0:
                 with open(cache_path, "wb") as f:
                     pickle.dump(all_results, f)
+            metrics.faces_found = sum(r.get("face_count", 0) for r in all_results)
+            metrics.write_state(output_folder)
 
-    # Final save
+        if batch_paths:
+            _flush_image_batch(pipeline, batch_paths, all_results, log_file, metrics, config)
+
     with open(cache_path, "wb") as f:
         pickle.dump(all_results, f)
 
+    _write_metadata(output_folder, pipeline)
+
     log.info("=" * 40)
-    log.info(f"✅ Done!")
-    log.info(f"   Photos scanned : {len(photos):,}")
-    log.info(f"   Faces found    : {sum(r['face_count'] for r in all_results):,}")
-    log.info(f"   Common photos  : {sum(1 for r in all_results if r['is_common']):,}")
-    log.info(f"   No face / skip : {failed + skipped:,}")
-    log.info(f"   Saved to       : {cache_path}")
+    log.info("✅ Done!")
+    log.info("   Media scanned  : %s", f"{len(media_files):,}")
+    log.info("   Faces found    : %s", f"{sum(r['face_count'] for r in all_results):,}")
+    log.info("   Backend        : %s", pipeline.backend_name)
+    log.info("   Avg sec/file   : %s", metrics.sec_per_file())
+    log.info("   Saved to       : %s", cache_path)
+    gc.collect()
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+def _flush_image_batch(
+    pipeline: FacePipeline,
+    paths: list[Path],
+    all_results: list,
+    log_file,
+    metrics: RunMetrics,
+    config: PreprocessConfig,
+):
+    t0 = time.time()
+    batch_results = pipeline.encode_photo_batch(paths)
+    faces = 0
+    for p, result in zip(paths, batch_results):
+        log_file.write(str(p) + "\n")
+        if result:
+            all_results.append(result)
+            faces += result.get("face_count", 0)
+            metrics.success += 1
+        else:
+            metrics.failed += 1
+    metrics.record_batch(len(paths), time.time() - t0, faces)
+    gc.collect()
+
+
+def _write_metadata(output_folder: Path, pipeline: FacePipeline) -> None:
+    import json
+    meta = {
+        "backend": pipeline.backend_name,
+        "embedding_dim": pipeline.backend.embedding_dim,
+        "model": pipeline.model_label,
+    }
+    (output_folder / "encodings_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
 
 if __name__ == "__main__":
     args = parse_args()
+    config = PreprocessConfig()
 
-    # Resolve input folder — CLI arg or interactive prompt
+    if args.ssd_root:
+        config.ssd_root = Path(args.ssd_root).resolve()
+    if args.backend:
+        config.backend = args.backend
+    if args.model:
+        config.dlib_model = args.model
+    if args.batch_size:
+        config.batch_size = args.batch_size
+
+    config.ensure_dirs()
+    log.info("SSD root: %s", config.ssd_root)
+
     if args.input:
         input_folder = Path(args.input).expanduser().resolve()
         if not input_folder.exists():
@@ -324,9 +252,8 @@ if __name__ == "__main__":
         input_folder = prompt_for_folder()
 
     output_folder = Path(args.output).expanduser().resolve()
+    log.info("Input  : %s", input_folder)
+    log.info("Output : %s", output_folder)
+    log.info("Resume : %s", args.resume)
 
-    log.info(f"Input  : {input_folder}")
-    log.info(f"Output : {output_folder}")
-    log.info(f"Resume : {args.resume}")
-
-    run(input_folder, output_folder, resume=args.resume, model=args.model)
+    run(input_folder, output_folder, resume=args.resume, config=config)

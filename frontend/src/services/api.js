@@ -41,6 +41,13 @@ export const registerFace = (guestId, selfieFiles) => {
 export const getPhotos = (guestId, page = 1) =>
   api.get(`/photos/${guestId}?page=${page}&limit=50`)
 
+export const getAllPhotos = (page = 1) =>
+  api.get(`/photos/all?page=${page}&limit=50`)
+
+export const getPhotoPeople = (driveId) =>
+  api.get(`/photos/${driveId}/people`)
+
+
 export const prepareDownload = (guestId) =>
   api.post(`/download/${guestId}/prepare`)
 
@@ -96,5 +103,63 @@ export const adminRunMatchingAll = (tolerance = null) =>
 
 export const adminDeleteGuest = (guestId) =>
   api.delete(`/admin/guests/${guestId}`)
+
+export const adminUpdateGuest = (guestId, name, phone, selfieFile = null, tolerance = null) => {
+  const form = new FormData()
+  form.append('name', name)
+  form.append('phone', phone || '')
+  if (selfieFile) {
+    form.append('selfie', selfieFile)
+  }
+  if (tolerance !== null && tolerance !== undefined) {
+    form.append('tolerance', tolerance)
+  }
+  return api.patch(`/admin/guests/${guestId}`, form)
+}
+
+export const sharePhoto = (driveId, guestId) =>
+  api.post('/photos/share', { drive_id: driveId, guest_id: guestId })
+
+export const getGuestsList = () =>
+  api.get('/faces/guests-list')
+
+export const getCategories = () =>
+  api.get('/photos/categories')
+
+export const createCategory = (name) =>
+  api.post('/photos/categories', { name })
+
+export const getCategoryPhotos = (name) =>
+  api.get(`/photos/categories/${encodeURIComponent(name)}/photos`)
+
+export const uploadCategoryPhoto = (name, file) => {
+  const form = new FormData()
+  form.append('file', file)
+  return api.post(`/photos/categories/${encodeURIComponent(name)}/upload`, form)
+}
+
+export const mergeClusters = (targetId, sourceIds) =>
+  api.post('/faces/clusters/merge', { target_id: targetId, source_ids: sourceIds })
+
+export const unmergeCluster = (clusterId) =>
+  api.delete(`/faces/clusters/${clusterId}/unmerge`)
+
+export const setClusterProfilePic = (clusterId, driveId) =>
+  api.post(`/faces/clusters/${clusterId}/set-profile-pic`, { drive_id: driveId })
+
+export const deletePhotosBatch = (driveIds) =>
+  api.post('/photos/delete-batch', { drive_ids: driveIds })
+
+export const downloadPhotosBatch = (driveIds) =>
+  api.post('/photos/download-batch', { drive_ids: driveIds }, { responseType: 'blob' })
+
+export const uploadClusterProfilePic = (clusterId, file) => {
+  const form = new FormData()
+  form.append('file', file)
+  return api.post(`/faces/clusters/${clusterId}/upload-profile-pic`, form)
+}
+
+export const notMePhoto = (driveId, guestId) =>
+  api.post(`/photos/${driveId}/not-me`, { guest_id: guestId })
 
 export default api

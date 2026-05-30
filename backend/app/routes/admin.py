@@ -143,6 +143,115 @@ async def create_guest(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.patch("/guests/{guest_id}")
+async def update_guest_profile(
+    guest_id: str,
+    name: Optional[str] = Form(None),
+    phone: Optional[str] = Form(None),
+    selfie: UploadFile = File(None),
+    tolerance: Optional[float] = Form(None),
+    x_admin_password: str = Header(..., alias="x-admin-password")
+):
+    """Update a guest's profile details (name, phone) and/or reference face photo."""
+    if x_admin_password != settings.ADMIN_PASSWORD:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    try:
+        # 1. Fetch guest record
+        guest_res = supabase.table("guests").select("*").eq("id", guest_id).execute()
+        if not guest_res.data:
+            raise HTTPException(status_code=404, detail="Guest not found")
+        old_guest = guest_res.data[0]
+        old_name = old_guest["name"]
+
+        # 2. Update database fields
+        update_payload = {}
+        if name is not None:
+            update_payload["name"] = name.strip()
+        if phone is not None:
+            update_payload["phone"] = phone.strip()
+
+        if update_payload:
+            supabase.table("guests").update(update_payload).eq("id", guest_id).execute()
+
+        # Sync renaming in cluster_names.json
+        if name is not None and old_name.strip().lower() != name.strip().lower():
+            try:
+                from app.services.drive_cache import get_cached_json, save_cached_json
+                names_data = get_cached_json("cluster_names.json") or {}
+                updated_any = False
+                for k, v in list(names_data.items()):
+                    if v.strip().lower() == old_name.strip().lower():
+                        names_data[k] = name.strip()
+                        updated_any = True
+                if updated_any:
+                    save_cached_json("cluster_names.json", names_data)
+            except Exception as sync_err:
+                log.error(f"Failed to sync guest renaming in cluster_names.json: {sync_err}")
+
+        # 3. Handle new reference photo (selfie)
+        if selfie:
+            selfie_bytes = await selfie.read()
+            if len(selfie_bytes) > 0:
+                from app.services.drive_cache import save_cached_file, get_cached_json
+                # Save to persistent cache
+                save_cached_file(f"selfie_{guest_id}.jpg", selfie_bytes)
+
+                # Auto-name cluster
+                try:
+                    from app.routes.faces import auto_name_cluster_for_guest
+                    final_name = name.strip() if name is not None else old_name.strip()
+                    auto_name_cluster_for_guest(final_name, selfie_bytes)
+                except Exception as auto_name_err:
+                    log.warning(f"Could not auto-name cluster on edit selfie: {auto_name_err}")
+
+                # Run matching
+                match_result = match_guest_selfie(selfie_bytes, tolerance=tolerance)
+                if match_result.get("success", True):
+                    personal_ids = resolve_drive_ids(match_result["personal_photos"])
+                    common_ids = resolve_drive_ids(match_result["common_photos"])
+
+                    # Load disassociated photos
+                    disassociated = (get_cached_json("disassociated_photos.json") or {}).get(guest_id, [])
+                    disassociated_set = set(disassociated)
+
+                    unique_photos = {}
+                    for drive_id in personal_ids:
+                        if drive_id:
+                            unique_photos[drive_id] = {"drive_path": drive_id, "is_common": False, "face_count": 1}
+                    for drive_id in common_ids:
+                        if drive_id:
+                            unique_photos[drive_id] = {"drive_path": drive_id, "is_common": True, "face_count": 4}
+
+                    photos_to_upsert = list(unique_photos.values())
+                    if photos_to_upsert:
+                        upserted = supabase.table("photos").upsert(photos_to_upsert, on_conflict="drive_path").execute()
+                        if upserted.data:
+                            drive_to_id = {p["drive_path"]: p["id"] for p in upserted.data}
+                            photo_rows = []
+                            seen_photo_ids = set()
+                            for drive_id in list(personal_ids) + list(common_ids):
+                                pid = drive_to_id.get(drive_id)
+                                if pid and pid not in seen_photo_ids and pid not in disassociated_set:
+                                    seen_photo_ids.add(pid)
+                                    photo_rows.append({"guest_id": guest_id, "photo_id": pid})
+                            if photo_rows:
+                                supabase.table("guest_photos").upsert(photo_rows, on_conflict="guest_id,photo_id").execute()
+
+        # Re-fetch guest to return fresh details
+        fresh_res = supabase.table("guests").select("*").eq("id", guest_id).execute()
+        fresh_guest = fresh_res.data[0]
+        
+        # Get count
+        gp_res = supabase.table("guest_photos").select("photo_id").eq("guest_id", guest_id).execute()
+        fresh_guest["photo_count"] = len(gp_res.data) if gp_res.data else 0
+
+        return fresh_guest
+    except Exception as e:
+        log.error(f"Error updating guest profile: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/guests/{guest_id}/photos")
 def get_guest_personal_photos(guest_id: str, x_admin_password: str = Header(..., alias="x-admin-password")):
     """Get only the personal matching photos for the guest (excludes common photos for disassociation)."""

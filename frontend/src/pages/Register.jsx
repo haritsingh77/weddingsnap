@@ -99,7 +99,9 @@ export default function Register() {
     const submit = async () => {
         setStep('loading')
         try {
-            const file = new File([selfieBlob], 'selfie.jpg', { type: 'image/jpeg' })
+            const file = selfieBlob instanceof File 
+                ? selfieBlob 
+                : new File([selfieBlob], 'selfie.jpg', { type: 'image/jpeg' })
             const res = await registerFace(guestId, file)
             setMatchInfo(res.data)
             setTimeout(() => navigate('/gallery'), 2500)
@@ -153,6 +155,13 @@ export default function Register() {
                         >
                             Start Scanner
                         </button>
+
+                        <label
+                            htmlFor="selfie-file-upload"
+                            className="w-full mt-3 bg-white border border-stone-200 text-stone-700 rounded-xl py-4 font-semibold text-sm tracking-widest uppercase hover:bg-stone-50 active:scale-[0.98] transition-all duration-300 cursor-pointer block text-center shadow-xs"
+                        >
+                            📤 Choose from Gallery
+                        </label>
 
                         <button
                             onClick={skipToGallery}
@@ -288,6 +297,13 @@ export default function Register() {
                             Retry Scanner
                         </button>
 
+                        <label
+                            htmlFor="selfie-file-upload"
+                            className="w-full mt-3 bg-white border border-stone-200 text-stone-700 rounded-xl py-4 font-semibold text-sm tracking-widest uppercase hover:bg-stone-50 active:scale-[0.98] transition-all duration-300 cursor-pointer block text-center shadow-xs"
+                        >
+                            📤 Choose from Gallery
+                        </label>
+
                         <button
                             onClick={skipToGallery}
                             className="w-full text-stone-400 text-xs font-medium py-3 hover:text-stone-600 transition-colors cursor-pointer underline-offset-2 hover:underline"
@@ -297,6 +313,20 @@ export default function Register() {
                     </div>
                 )}
 
+                <input
+                    type="file"
+                    accept="image/*"
+                    id="selfie-file-upload"
+                    className="hidden"
+                    onChange={(e) => {
+                        const file = e.target.files[0]
+                        if (file) {
+                            setSelfieBlob(file)
+                            setPreview(URL.createObjectURL(file))
+                            setStep('preview')
+                        }
+                    }}
+                />
             </div>
         </div>
     )

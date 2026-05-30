@@ -24,7 +24,28 @@ chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
 def is_preprocessor_running() -> bool:
     """Check if the preprocess_drive.py script is currently running."""
+    import platform
     try:
+        if platform.system() == "Windows":
+            res = subprocess.run(
+                ["tasklist", "/FI", "IMAGENAME eq python.exe", "/FO", "CSV", "/NH"],
+                capture_output=True,
+                text=True,
+            )
+            # Also check WMI command line for script name
+            wmi = subprocess.run(
+                [
+                    "powershell",
+                    "-Command",
+                    "Get-CimInstance Win32_Process -Filter \"name='python.exe'\" | "
+                    "Select-Object -ExpandProperty CommandLine",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            combined = (res.stdout or "") + (wmi.stdout or "")
+            return "preprocess_drive.py" in combined
         res = subprocess.run(["ps", "aux"], capture_output=True, text=True)
         return "preprocess_drive.py" in res.stdout
     except Exception:
@@ -82,7 +103,7 @@ def get_preprocessor_stats() -> str:
 
     # If running and we have fresh state data (updated in the last 15 minutes)
     if running and state_data and state_data.get("status") == "running" and (time.time() - state_data.get("last_update", 0) < 900):
-        model_str = state_data.get("model", "cnn").upper()
+        model_str = state_data.get("backend", state_data.get("model", "cnn")).upper()
         total_files = state_data.get("total_files", 12823)
         processed_all = state_data.get("processed_files_all_time", processed_count)
         pct = (processed_all / total_files) * 100 if total_files else 0

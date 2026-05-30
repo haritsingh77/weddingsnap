@@ -28,6 +28,9 @@ class Config:
         GOOGLE_SERVICE_ACCOUNT_JSON = _service_account_path
     
     FACE_MATCH_TOLERANCE = float(os.getenv("FACE_MATCH_TOLERANCE", "0.5"))
+    ARCFACE_MATCH_TOLERANCE = float(os.getenv("ARCFACE_MATCH_THRESHOLD", "0.4"))
+    FACE_BACKEND = os.getenv("FACE_BACKEND", "auto")
+    WEDDINGSNAP_SSD_ROOT = os.getenv("WEDDINGSNAP_SSD_ROOT", "")
     ENCODINGS_CACHE_PATH = os.getenv(
         "ENCODINGS_CACHE_PATH",
         str(Path(__file__).resolve().parent.parent / "encodings" / "face_encodings.pkl")

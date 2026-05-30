@@ -14,7 +14,7 @@ backend/app/__pycache__/
 *.pkl
 *.npy
 encodings/
-
+.venv/
 # Node
 frontend/node_modules/
 frontend/dist/
@@ -31,10 +31,13 @@ backend/.env
 
 # Local Cache & Temp Directories
 cache/
+cache_ssd/
 temp_preprocess/
 backend/cache/
 backend/encodings/
 backend/temp_preprocess/
+cluster_review/
+scratch/
 
 # Log files
 *.log

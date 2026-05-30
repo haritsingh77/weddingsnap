@@ -108,11 +108,15 @@ async def register_face(
             if upserted.data:
                 drive_to_id = {p["drive_path"]: p["id"] for p in upserted.data}
 
+                from app.services.drive_cache import get_cached_json
+                disassociated = (get_cached_json("disassociated_photos.json") or {}).get(guest_id, [])
+                disassociated_set = set(disassociated)
+
                 # Build guest_photos mapping rows — use a set to deduplicate
                 seen_photo_ids: set[str] = set()
                 for drive_id in list(personal_ids) + list(common_ids):
                     pid = drive_to_id.get(drive_id)
-                    if pid and pid not in seen_photo_ids:
+                    if pid and pid not in seen_photo_ids and pid not in disassociated_set:
                         seen_photo_ids.add(pid)
                         photo_rows.append({"guest_id": guest_id, "photo_id": pid})
 
@@ -182,19 +186,129 @@ from fastapi import Response
 from googleapiclient.http import MediaIoBaseDownload
 
 from app.services.face_service import load_encodings, get_filename_map
-from app.services.drive_service import get_drive_service
+from app.services.drive_service import get_drive_service, download_file_to_memory, download_file_from_drive
 from app.config import settings
 
 CACHE_THUMB_DIR = Path("cache/thumbnails")
 
 
+_cached_clusters = None
+_cached_clusters_key = None
+
+
+def _cluster_faces_scalable(X: np.ndarray, threshold: float, backend: str) -> np.ndarray:
+    """
+    Scalable face clustering using FAISS ANN + Union-Find.
+    Memory: O(n * k) instead of O(n²) — works for 100k+ faces.
+
+    For InsightFace ArcFace (512-d):
+      - Normalise to unit sphere
+      - Use IndexFlatIP (inner product == cosine on unit vectors)
+      - Union pairs whose cosine similarity >= (1 - threshold)
+
+    For dlib (128-d):
+      - DBSCAN with ball_tree, PCA-reduced to 64-d when n > 5000
+    """
+    n, d = X.shape
+    if n == 0:
+        return np.array([], dtype=int)
+
+    if backend == "insightface":
+        try:
+            import faiss  # bundled with insightface / faiss-cpu
+
+            # Normalise embeddings to unit sphere
+            norms = np.linalg.norm(X, axis=1, keepdims=True)
+            norms = np.where(norms == 0, 1.0, norms)
+            X_norm = (X / norms).astype(np.float32)
+
+            ip_threshold = float(1.0 - threshold)   # cosine sim >= this → same person
+            k = min(50, n)                            # neighbours to probe
+
+            index = faiss.IndexFlatIP(d)
+            index.add(X_norm)
+            D, I = index.search(X_norm, k)           # D[i][j] = cosine similarity
+
+            # Union-Find ---------------------------------------------------
+            parent = list(range(n))
+
+            def find(x: int) -> int:
+                while parent[x] != x:
+                    parent[x] = parent[parent[x]]   # path compression
+                    x = parent[x]
+                return x
+
+            def union(x: int, y: int) -> None:
+                rx, ry = find(x), find(y)
+                if rx != ry:
+                    parent[rx] = ry
+
+            for i in range(n):
+                for j_pos in range(1, k):            # skip self at j_pos=0
+                    j = int(I[i][j_pos])
+                    if j == -1:
+                        break
+                    if D[i][j_pos] >= ip_threshold:
+                        union(i, j)
+
+            # Assign contiguous labels
+            root_to_label: dict[int, int] = {}
+            labels = np.full(n, -1, dtype=int)
+            next_lbl = 0
+            for i in range(n):
+                r = find(i)
+                if r not in root_to_label:
+                    root_to_label[r] = next_lbl
+                    next_lbl += 1
+                labels[i] = root_to_label[r]
+
+            return labels
+
+        except ImportError:
+            log.warning("faiss not available — falling back to DBSCAN for InsightFace.")
+            # Fall through to DBSCAN path
+
+    # dlib / fallback: DBSCAN with dimensionality reduction when large
+    from sklearn.decomposition import PCA
+
+    X_f = X.astype(np.float32)
+    if n > 5000 and d > 64:
+        n_components = min(64, d, n - 1)
+        X_f = PCA(n_components=n_components).fit_transform(X_f)
+
+    db = DBSCAN(eps=threshold, min_samples=2, algorithm="ball_tree", n_jobs=-1)
+    return db.fit_predict(X_f)
+
+
 def get_face_clusters() -> dict:
     """
-    Cluster all precomputed face encodings in face_encodings.pkl using Agglomerative Clustering (complete linkage) to prevent the chaining effect.
+    Cluster all precomputed face encodings in face_encodings.pkl.
+    Uses FAISS-based nearest-neighbour graph + Union-Find — O(n*k) memory,
+    works for 100k+ faces without OOM.
     """
-    try:
-        # Clear the LRU cache to make sure we load the newly preprocessed face encodings
+    global _cached_clusters, _cached_clusters_key
+
+    from app.services.drive_cache import LOCAL_CACHE_DIR
+    import os
+
+    local_pkl = LOCAL_CACHE_DIR / "face_encodings.pkl"
+    mtime = 0
+    size = 0
+    if local_pkl.exists():
+        try:
+            mtime = os.path.getmtime(local_pkl)
+            size  = os.path.getsize(local_pkl)
+        except Exception:
+            pass
+
+    if _cached_clusters is not None and _cached_clusters_key == (mtime, size):
+        return _cached_clusters
+
+    # Only clear LRU cache when the pkl file has actually changed on disk
+    if _cached_clusters_key != (mtime, size):
         load_encodings.cache_clear()
+
+    try:
         all_records = load_encodings()
     except Exception as e:
         log.warning(f"Could not load encodings for clustering: {e}")
@@ -202,70 +316,66 @@ def get_face_clusters() -> dict:
 
     X = []
     origins = []
-    for photo_idx, record in enumerate(all_records):
-        encs = record.get("encodings", [])
-        locs = record.get("locations", [])
+    for record in all_records:
+        encs   = record.get("encodings", [])
+        locs   = record.get("locations", [])
         frames = record.get("frame_indices", [None] * len(encs))
 
-        for face_idx, (enc, loc, frame) in enumerate(zip(encs, locs, frames)):
+        for enc, loc, frame in zip(encs, locs, frames):
             X.append(enc)
-            origins.append(
-                {
-                    "path": record["path"],
-                    "location": loc,
-                    "frame_idx": frame,
-                    "is_video": record["path"]
-                    .lower()
-                    .endswith((".mp4", ".mov", ".avi", ".mkv", ".webm")),
-                }
-            )
+            origins.append({
+                "path":      record["path"],
+                "location":  loc,
+                "frame_idx": frame,
+                "is_video":  record["path"].lower().endswith((".mp4", ".mov", ".avi", ".mkv", ".webm")),
+            })
 
     if not X:
         return {}
 
-    X = np.array(X)
-    # Agglomerative clustering with complete linkage (guarantees no two faces in a cluster exceed settings.FACE_MATCH_TOLERANCE distance)
-    agg = AgglomerativeClustering(
-        distance_threshold=settings.FACE_MATCH_TOLERANCE,
-        n_clusters=None,
-        linkage="complete",
-        metric="euclidean",
-    ).fit(X)
-    labels = agg.labels_
+    X_arr = np.array(X)
 
-    clusters = {}
+    backend = "dlib"
+    cluster_threshold = settings.FACE_MATCH_TOLERANCE
+    try:
+        from scripts.face_engine.matching import detect_backend_from_records, default_tolerance
+        backend = detect_backend_from_records(all_records)
+        cluster_threshold = default_tolerance(backend)
+    except Exception:
+        pass
+
+    log.info("Clustering %d face vectors (backend=%s, threshold=%.3f) ...", len(X_arr), backend, cluster_threshold)
+    labels = _cluster_faces_scalable(X_arr, cluster_threshold, backend)
+    log.info("Clustering done. Unique clusters: %d", len(set(labels)))
+
+    clusters: dict = {}
     for idx, label in enumerate(labels):
         if label == -1:
-            continue  # ignore noise
-
+            continue   # noise point
         label_str = str(label)
         origin = origins[idx]
-
         if label_str not in clusters:
             clusters[label_str] = {"members": [], "photos": set()}
-
         clusters[label_str]["members"].append(origin)
         clusters[label_str]["photos"].add(origin["path"])
 
-    result = {}
+    result: dict = {}
     for label_str, data in clusters.items():
-        # Prefer photo files over video files as the representative thumbnail
-        rep = None
-        for member in data["members"]:
-            if not member["is_video"]:
-                rep = member
-                break
-        if not rep:
-            rep = data["members"][0]
-
+        # Prefer a photo (not video) as the representative thumbnail
+        rep = next((m for m in data["members"] if not m["is_video"]), data["members"][0])
         result[label_str] = {
             "representative": rep,
-            "photos": sorted(list(data["photos"])),
-            "count": len(data["photos"]),
+            "photos":  sorted(data["photos"]),
+            "count":   len(data["photos"]),
+            "members": data["members"],
         }
 
-    # Sort clusters descending by how many photos the person appears in
-    return dict(sorted(result.items(), key=lambda x: x[1]["count"], reverse=True))
+    # Sort by photo count descending
+    sorted_result = dict(sorted(result.items(), key=lambda x: x[1]["count"], reverse=True))
+
+    _cached_clusters     = sorted_result
+    _cached_clusters_key = (mtime, size)
+    return sorted_result
 
 
 from pydantic import BaseModel
@@ -273,6 +383,10 @@ from pydantic import BaseModel
 
 class RenameClusterRequest(BaseModel):
     name: str
+
+
+class SetProfilePicRequest(BaseModel):
+    drive_id: str
 
 
 @router.get("/clusters")
@@ -299,15 +413,14 @@ def get_clusters():
         for guest in guests:
             guest_id = guest["id"]
             cnt = counts.get(guest_id, 0)
-            if cnt > 0:  # only show guests who have matches
-                guests_list.append({
-                    "id": f"guest_{guest_id}",
-                    "name": guest["name"],
-                    "count": cnt,
-                    "thumbnail_url": f"/faces/guests/{guest_id}/selfie",
-                    "is_guest": True
-                })
-                registered_names.add(guest["name"].strip().lower())
+            guests_list.append({
+                "id": f"guest_{guest_id}",
+                "name": guest["name"],
+                "count": cnt,
+                "thumbnail_url": f"/faces/guests/{guest_id}/selfie",
+                "is_guest": True
+            })
+            registered_names.add(guest["name"].strip().lower())
     except Exception as e:
         log.error(f"Error fetching guests for clusters tab: {e}")
 
@@ -330,12 +443,17 @@ def get_clusters():
                 clusters[target_id]["count"] = len(merged_photos)
                 absorbed_ids.add(src_id)
 
+    reps_data = get_cached_json("cluster_representatives.json") or {}
     ui_clusters = []
     for cid, cdata in clusters.items():
         if cid in absorbed_ids:
             continue  # skip clusters that were merged into another
 
-        rep = cdata["representative"]
+        if cid in reps_data:
+            rep = reps_data[cid]
+        else:
+            rep = cdata["representative"]
+
         filename = Path(rep["path"]).name
         drive_id = mapping.get(filename, "")
         loc = rep["location"]
@@ -362,8 +480,9 @@ def get_clusters():
             }
         )
 
-    # Sort raw clusters by count descending, then append after guests
+    # Sort raw clusters by count descending, slice to top 100 to reduce UI noise, and append after guests
     ui_clusters = sorted(ui_clusters, key=lambda x: x["count"], reverse=True)
+    ui_clusters = ui_clusters[:100]
     return guests_list + ui_clusters
 
 
@@ -373,7 +492,34 @@ def rename_cluster(cluster_id: str, body: RenameClusterRequest):
     if cluster_id.startswith("guest_"):
         guest_id = cluster_id.replace("guest_", "")
         new_name = body.name.strip()
+        
+        # 1. Fetch old name to sync in cluster_names.json
+        old_name = ""
+        try:
+            old_res = supabase.table("guests").select("name").eq("id", guest_id).execute()
+            if old_res.data:
+                old_name = old_res.data[0]["name"]
+        except Exception as old_err:
+            log.error(f"Failed to fetch old guest name: {old_err}")
+            
+        # 2. Update database
         supabase.table("guests").update({"name": new_name}).eq("id", guest_id).execute()
+        
+        # 3. Synchronize occurrences inside cluster_names.json
+        if old_name and old_name.strip().lower() != new_name.lower():
+            try:
+                from app.services.drive_cache import get_cached_json, save_cached_json
+                names_data = get_cached_json("cluster_names.json") or {}
+                updated_any = False
+                for k, v in list(names_data.items()):
+                    if v.strip().lower() == old_name.strip().lower():
+                        names_data[k] = new_name
+                        updated_any = True
+                if updated_any:
+                    save_cached_json("cluster_names.json", names_data)
+            except Exception as sync_err:
+                log.error(f"Failed to sync guest rename in cluster_names.json: {sync_err}")
+                
         return {"success": True, "cluster_id": cluster_id, "name": new_name}
 
     from app.services.drive_cache import get_cached_json, save_cached_json
@@ -535,33 +681,14 @@ def get_cluster_photos(cluster_id: str):
     return resolved
 
 
-@router.get("/guests/{guest_id}/selfie")
-def get_guest_selfie_public(guest_id: str):
-    """Public endpoint to serve guest reference selfies without admin password for gallery views."""
-    from app.services.drive_cache import get_cached_file
-    selfie_data = get_cached_file(f"selfie_{guest_id}.jpg")
-    if not selfie_data:
-        raise HTTPException(status_code=404, detail="Selfie not found")
-    return Response(content=selfie_data, media_type="image/jpeg")
+def get_face_crop_bytes(rep: dict) -> bytes:
+    """Download, crop, and cache a face representative image."""
+    from app.services.drive_cache import get_cached_file, save_cached_file, LOCAL_CACHE_DIR
 
-
-@router.get("/clusters/{cluster_id}/thumbnail")
-def get_cluster_thumbnail(cluster_id: str):
-    """Return a cropped square face thumbnail of the person in the cluster.
-    Cache hierarchy: local /tmp (L1) → Drive cache folder (persistent).
-    """
-    from app.services.drive_cache import get_cached_file, save_cached_file
-
-    # ── Get fresh cluster representative details first to find its stable key ─────
-    clusters = get_face_clusters()
-    if cluster_id not in clusters:
-        raise HTTPException(status_code=404, detail="Face cluster not found")
-
-    rep = clusters[cluster_id]["representative"]
     path_str = rep["path"]
     location = rep["location"]  # [top, right, bottom, left]
     is_video = rep["is_video"]
-    frame_idx = rep["frame_idx"]
+    frame_idx = rep.get("frame_idx")
 
     filename = Path(path_str).name
     mapping = get_filename_map()
@@ -578,7 +705,7 @@ def get_cluster_thumbnail(cluster_id: str):
     # ── 1. Check Drive-backed cache ───────────────────────────────────────────
     cached_data = get_cached_file(cache_key)
     if cached_data:
-        return Response(content=cached_data, media_type="image/jpeg")
+        return cached_data
 
     # ── 2. Generate fresh thumbnail ───────────────────────────────────────────
     try:
@@ -591,7 +718,6 @@ def get_cluster_thumbnail(cluster_id: str):
             try:
                 img = Image.open(io.BytesIO(thumb_data)).convert("RGB")
                 # HOG detector ran on 1200px max image size. Scale coordinates dynamically.
-                # E.g., if thumbnail max dimension is 400, scale factor is 400 / 1200 = 1/3
                 w, h = img.size
                 scale = max(w, h) / 1200.0
                 top, right, bottom, left = [int(c * scale) for c in location]
@@ -601,20 +727,14 @@ def get_cluster_thumbnail(cluster_id: str):
 
         if img is None:
             # Fall back to downloading the full file from Google Drive if thumbnail is missing or crop failed
-            service = get_drive_service()
             if is_video:
-                # Use /tmp for temp video file (works on hosted servers)
-                temp_video = Path(f"/tmp/weddingsnap_cache/temp_thumb_{cluster_id}.tmp")
+                # Use local cache directory to ensure write permission on Windows
+                temp_video = LOCAL_CACHE_DIR / f"temp_thumb_{drive_id}.tmp"
                 temp_video.parent.mkdir(parents=True, exist_ok=True)
 
-                request = service.files().get_media(fileId=drive_id)
-                with open(temp_video, "wb") as f:
-                    downloader = MediaIoBaseDownload(
-                        f, request, chunksize=1024 * 1024 * 5
-                    )
-                    done = False
-                    while not done:
-                        _, done = downloader.next_chunk()
+                success = download_file_from_drive(drive_id, temp_video)
+                if not success:
+                    raise Exception("Could not download video from Google Drive")
 
                 cap = cv2.VideoCapture(str(temp_video))
                 cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx or 0)
@@ -622,7 +742,10 @@ def get_cluster_thumbnail(cluster_id: str):
                 cap.release()
 
                 if temp_video.exists():
-                    temp_video.unlink()
+                    try:
+                        temp_video.unlink()
+                    except Exception:
+                        pass
 
                 if not ret:
                     raise Exception("Could not decode video frame")
@@ -630,16 +753,10 @@ def get_cluster_thumbnail(cluster_id: str):
                 rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 img = Image.fromarray(rgb_frame)
             else:
-                request = service.files().get_media(fileId=drive_id)
-                img_bytes = io.BytesIO()
-                downloader = MediaIoBaseDownload(
-                    img_bytes, request, chunksize=1024 * 1024 * 2
-                )
-                done = False
-                while not done:
-                    _, done = downloader.next_chunk()
-                img_bytes.seek(0)
-                img = Image.open(img_bytes).convert("RGB")
+                data = download_file_to_memory(drive_id)
+                if not data:
+                    raise Exception("Could not download image from Google Drive")
+                img = Image.open(io.BytesIO(data)).convert("RGB")
 
             if not is_video:
                 img = ImageOps.exif_transpose(img)
@@ -677,13 +794,67 @@ def get_cluster_thumbnail(cluster_id: str):
         # ── 3. Save to Drive cache (persistent) + L1 ─────────────────────────
         save_cached_file(cache_key, result_bytes, mime_type="image/jpeg")
 
-        return Response(content=result_bytes, media_type="image/jpeg")
+        return result_bytes
 
     except Exception as e:
-        log.error(f"Error creating thumbnail for face cluster {cluster_id}: {e}")
+        log.error(f"Error creating thumbnail for face representative: {e}")
         raise HTTPException(
             status_code=500, detail=f"Failed to generate face thumbnail: {e}"
         )
+
+
+@router.get("/guests/{guest_id}/selfie")
+def get_guest_selfie_public(guest_id: str):
+    """Public endpoint to serve guest reference selfies without admin password for gallery views."""
+    from app.services.drive_cache import get_cached_file, get_cached_json
+    
+    # Check if guest has a custom profile picture override
+    reps_data = get_cached_json("cluster_representatives.json") or {}
+    guest_key = f"guest_{guest_id}"
+    if guest_key in reps_data:
+        # Check custom upload override
+        if reps_data[guest_key].get("is_custom_upload"):
+            avatar_name = reps_data[guest_key]["avatar_path"]
+            avatar_data = get_cached_file(avatar_name)
+            if avatar_data:
+                return Response(content=avatar_data, media_type="image/jpeg")
+
+        try:
+            img_bytes = get_face_crop_bytes(reps_data[guest_key])
+            return Response(content=img_bytes, media_type="image/jpeg")
+        except Exception as e:
+            log.error(f"Failed to generate custom profile pic for guest {guest_id}: {e}")
+
+    selfie_data = get_cached_file(f"selfie_{guest_id}.jpg")
+    if not selfie_data:
+        raise HTTPException(status_code=404, detail="Selfie not found")
+    return Response(content=selfie_data, media_type="image/jpeg")
+
+
+@router.get("/clusters/{cluster_id}/thumbnail")
+def get_cluster_thumbnail(cluster_id: str):
+    """Return a cropped square face thumbnail of the person in the cluster."""
+    from app.services.drive_cache import get_cached_json, get_cached_file
+    
+    # Check custom representative override
+    reps_data = get_cached_json("cluster_representatives.json") or {}
+    if cluster_id in reps_data:
+        # Check custom upload override
+        if reps_data[cluster_id].get("is_custom_upload"):
+            avatar_name = reps_data[cluster_id]["avatar_path"]
+            avatar_data = get_cached_file(avatar_name)
+            if avatar_data:
+                return Response(content=avatar_data, media_type="image/jpeg")
+
+        rep = reps_data[cluster_id]
+    else:
+        clusters = get_face_clusters()
+        if cluster_id not in clusters:
+            raise HTTPException(status_code=404, detail="Face cluster not found")
+        rep = clusters[cluster_id]["representative"]
+        
+    img_bytes = get_face_crop_bytes(rep)
+    return Response(content=img_bytes, media_type="image/jpeg")
 
 
 def auto_name_cluster_for_guest(guest_name: str, selfie_bytes: bytes):
@@ -777,3 +948,148 @@ def auto_name_cluster_for_guest(guest_name: str, selfie_bytes: bytes):
 
     except Exception as e:
         log.warning(f"Could not auto-name face cluster: {e}")
+
+
+@router.get("/guests-list")
+def get_guests_list():
+    """Get a simple list of guest names and IDs for manual sharing dropdown."""
+    try:
+        res = supabase.table("guests").select("id, name").order("name").execute()
+        return res.data or []
+    except Exception as e:
+        log.error(f"Error getting guests list: {e}")
+        return []
+
+
+@router.post("/clusters/{cluster_id}/set-profile-pic")
+def set_cluster_profile_pic(cluster_id: str, body: SetProfilePicRequest):
+    """Set custom profile picture for a raw cluster or guest."""
+    from app.services.drive_cache import get_cached_json, save_cached_json, get_cached_file
+    
+    # 1. Load face encodings/records
+    all_records = load_encodings()
+    mapping = get_filename_map()
+    
+    # Find matching record in face_encodings
+    matching_filename = None
+    for fname, did in mapping.items():
+        if did == body.drive_id:
+            matching_filename = fname
+            break
+            
+    if not matching_filename:
+        raise HTTPException(status_code=404, detail="Photo not found in registry")
+        
+    matching_record = None
+    for r in all_records:
+        if Path(r["path"]).name == matching_filename:
+            matching_record = r
+            break
+            
+    if not matching_record or not matching_record.get("encodings"):
+        raise HTTPException(status_code=400, detail="No face encodings found in this photo")
+        
+    encs = matching_record["encodings"]
+    locs = matching_record["locations"]
+    frames = matching_record.get("frame_indices", [None] * len(encs))
+    
+    # Find the best face index
+    best_idx = 0
+    if len(encs) > 1:
+        if cluster_id.startswith("guest_"):
+            guest_id = cluster_id.replace("guest_", "")
+            selfie_data = get_cached_file(f"selfie_{guest_id}.jpg")
+            if selfie_data:
+                try:
+                    from app.services.face_service import encode_selfie
+                    selfie_enc = encode_selfie(selfie_data)
+                    if selfie_enc is not None:
+                        dists = np.linalg.norm(np.array(encs) - selfie_enc, axis=1)
+                        best_idx = int(np.argmin(dists))
+                except Exception as selfie_err:
+                    log.warning(f"Could not encode selfie for custom profile pic: {selfie_err}")
+        else:
+            clusters = get_face_clusters()
+            if cluster_id in clusters:
+                cluster_members = clusters[cluster_id].get("members", [])
+                if cluster_members:
+                    rep_member = clusters[cluster_id]["representative"]
+                    rep_path = rep_member["path"]
+                    rep_loc = rep_member["location"]
+                    
+                    rep_enc = None
+                    for r in all_records:
+                        if r["path"] == rep_path:
+                            for enc, loc in zip(r["encodings"], r["locations"]):
+                                if loc == rep_loc:
+                                    rep_enc = enc
+                                    break
+                            if rep_enc is not None:
+                                break
+                    if rep_enc is not None:
+                        dists = np.linalg.norm(np.array(encs) - rep_enc, axis=1)
+                        best_idx = int(np.argmin(dists))
+
+    # Form the member dict for the selected profile pic
+    member = {
+        "path": matching_record["path"],
+        "location": locs[best_idx],
+        "frame_idx": frames[best_idx],
+        "is_video": matching_record["path"].lower().endswith((".mp4", ".mov", ".avi", ".mkv", ".webm"))
+    }
+    
+    # Save in cluster_representatives.json
+    reps_data = get_cached_json("cluster_representatives.json") or {}
+    reps_data[cluster_id] = member
+    save_cached_json("cluster_representatives.json", reps_data)
+    
+    return {"success": True, "representative": member}
+
+
+@router.post("/clusters/{cluster_id}/upload-profile-pic")
+async def upload_cluster_profile_pic(cluster_id: str, file: UploadFile = File(...)):
+    """Upload a custom local photo from device to set as profile picture."""
+    try:
+        from app.services.drive_cache import save_cached_file, get_cached_json, save_cached_json
+        from PIL import Image, ImageOps
+        import io
+        
+        # 1. Read uploaded file bytes
+        content = await file.read()
+        
+        # 2. Resize and crop to square 150x150
+        img = Image.open(io.BytesIO(content)).convert("RGB")
+        img = ImageOps.exif_transpose(img)
+        
+        # Crop to square
+        w, h = img.size
+        min_dim = min(w, h)
+        left = (w - min_dim) // 2
+        top = (h - min_dim) // 2
+        right = (w + min_dim) // 2
+        bottom = (h + min_dim) // 2
+        img = img.crop((left, top, right, bottom))
+        
+        img = img.resize((150, 150), Image.Resampling.LANCZOS)
+        
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=90)
+        jpeg_bytes = buf.getvalue()
+        
+        # 3. Save as custom_avatar_{cluster_id}.jpg
+        avatar_filename = f"custom_avatar_{cluster_id}.jpg"
+        save_cached_file(avatar_filename, jpeg_bytes, mime_type="image/jpeg")
+        
+        # 4. Save in representatives index
+        reps_data = get_cached_json("cluster_representatives.json") or {}
+        reps_data[cluster_id] = {
+            "is_custom_upload": True,
+            "avatar_path": avatar_filename
+        }
+        save_cached_json("cluster_representatives.json", reps_data)
+        
+        return {"success": True, "avatar_url": f"/faces/clusters/{cluster_id}/thumbnail"}
+    except Exception as e:
+        log.error(f"Failed to upload custom profile picture: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to upload profile picture: {e}")
+

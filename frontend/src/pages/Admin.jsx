@@ -8,7 +8,8 @@ import {
   adminRemoveGuestPhoto,
   adminRunGuestMatching,
   adminRunMatchingAll,
-  adminDeleteGuest
+  adminDeleteGuest,
+  adminUpdateGuest
 } from '../services/api'
 
 const API_BASE = import.meta.env.VITE_API_URL || 
@@ -43,6 +44,15 @@ export default function Admin() {
   const [loadingPhotos, setLoadingPhotos] = useState(false)
   const [lightboxIndex, setLightboxIndex] = useState(null)
   const [tolerance, setTolerance] = useState(0.55)
+
+  // Edit Guest Modal state
+  const [editingGuest, setEditingGuest] = useState(null)
+  const [editName, setEditName] = useState('')
+  const [editPhone, setEditPhone] = useState('')
+  const [editSelfieFile, setEditSelfieFile] = useState(null)
+  const [editSelfiePreview, setEditSelfiePreview] = useState(null)
+  const [updatingGuest, setUpdatingGuest] = useState(false)
+  const [editMessage, setEditMessage] = useState('')
 
   // Auto-authenticate if password already stored
   useEffect(() => {
@@ -187,6 +197,41 @@ export default function Admin() {
     } catch (err) {
       console.error(err)
       alert("Failed to remove match.")
+    }
+  }
+
+  const handleOpenEdit = (guest) => {
+    setEditingGuest(guest)
+    setEditName(guest.name)
+    setEditPhone(guest.phone || '')
+    setEditSelfieFile(null)
+    setEditSelfiePreview(null)
+    setEditMessage('')
+  }
+
+  const handleEditSubmit = async (e) => {
+    e.preventDefault()
+    if (!editName.trim()) return
+    setUpdatingGuest(true)
+    setEditMessage('')
+    try {
+      await adminUpdateGuest(
+        editingGuest.id,
+        editName.trim(),
+        editPhone.trim(),
+        editSelfieFile,
+        tolerance
+      )
+      setEditMessage('Guest details updated successfully!')
+      fetchGuestsList()
+      setTimeout(() => {
+        setEditingGuest(null)
+      }, 1050)
+    } catch (err) {
+      console.error("Failed to update guest details:", err)
+      setEditMessage('Failed to update guest. Ensure the server is online.')
+    } finally {
+      setUpdatingGuest(false)
     }
   }
 
@@ -429,6 +474,13 @@ export default function Admin() {
                             👁 Review
                           </button>
                           <button
+                            onClick={() => handleOpenEdit(guest)}
+                            className="text-stone-700 hover:text-stone-900 text-xs font-semibold bg-stone-100 hover:bg-stone-200 px-3 py-1.5 rounded-lg cursor-pointer"
+                            title="Edit guest profile and face photo"
+                          >
+                            ✏️ Edit
+                          </button>
+                          <button
                             onClick={() => handleRunMatching(guest.id)}
                             className="text-stone-400 hover:text-stone-700 text-xs p-1"
                             title="Re-run Face Match"
@@ -568,6 +620,111 @@ export default function Admin() {
                 className="max-w-full max-h-[85vh] object-contain rounded"
               />
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Edit Guest Modal Overlay */}
+      {editingGuest && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl border border-stone-200 animate-fade-in-up">
+            <div className="px-6 py-4 border-b border-stone-100 flex items-center justify-between">
+              <div>
+                <h3 className="font-serif text-lg text-stone-900 leading-none mb-1">Edit Guest Profile</h3>
+                <p className="text-stone-400 text-xs">Modify registry details or face reference photo.</p>
+              </div>
+              <button
+                onClick={() => setEditingGuest(null)}
+                className="text-stone-400 hover:text-stone-705 font-bold text-xl cursor-pointer"
+              >
+                &times;
+              </button>
+            </div>
+
+            <form onSubmit={handleEditSubmit} className="p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-stone-500 uppercase tracking-wider mb-1.5">Guest Name</label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:border-stone-400 text-stone-850 text-sm font-medium"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-stone-500 uppercase tracking-wider mb-1.5">Phone Number</label>
+                <input
+                  type="text"
+                  value={editPhone}
+                  onChange={(e) => setEditPhone(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:border-stone-400 text-stone-850 text-sm font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-stone-500 uppercase tracking-wider mb-1.5">Replace Face Photo (Selfie)</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files[0]
+                    if (file) {
+                      setEditSelfieFile(file)
+                      setEditSelfiePreview(URL.createObjectURL(file))
+                    }
+                  }}
+                  className="hidden"
+                  id="edit-selfie-upload"
+                />
+                <label
+                  htmlFor="edit-selfie-upload"
+                  className="block w-full border-2 border-dashed border-stone-200 hover:border-stone-400 rounded-xl p-4 text-center cursor-pointer transition duration-300"
+                >
+                  {editSelfiePreview ? (
+                    <img
+                      src={editSelfiePreview}
+                      alt="New Preview"
+                      className="w-20 h-20 object-cover mx-auto rounded-full border border-stone-200"
+                    />
+                  ) : (
+                    <div className="space-y-1.5">
+                      <img
+                        src={`${API_BASE}/admin/guests/${editingGuest.id}/selfie?password=${localStorage.getItem('admin_password')}`}
+                        alt="Current Selfie"
+                        className="w-20 h-20 object-cover mx-auto rounded-full border border-stone-200"
+                        onError={(e) => { e.target.src = '/logo.png' }}
+                      />
+                      <p className="text-[10px] text-stone-400 font-semibold uppercase tracking-wider">Click to upload new photo</p>
+                    </div>
+                  )}
+                </label>
+              </div>
+
+              {editMessage && (
+                <p className="text-stone-600 text-xs font-semibold text-center mt-2">
+                  {editMessage}
+                </p>
+              )}
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingGuest(null)}
+                  className="flex-1 border border-stone-200 text-stone-600 font-semibold py-2.5 rounded-xl hover:bg-stone-50 transition cursor-pointer text-xs uppercase tracking-wider text-center"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={updatingGuest}
+                  className="flex-2 bg-stone-900 text-white font-semibold py-2.5 rounded-xl hover:bg-stone-800 transition duration-300 cursor-pointer disabled:bg-stone-300 text-xs uppercase tracking-wider"
+                >
+                  {updatingGuest ? 'Saving Details...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -1,0 +1,26 @@
+# WeddingSnap preprocessing dependencies (install on Windows GPU machine)
+# Install AFTER backend/requirements.txt:
+#   pip install -r backend/requirements.txt
+#   pip install -r requirements-preprocess.txt
+
+# GPU inference (CUDA 11.x — matches driver CUDA 11.6 on GTX 1650)
+onnxruntime-gpu>=1.17.1,<1.18.0
+# DLL helper packages for CUDA 11.x support on Windows:
+# nvidia-cuda-runtime-cu11
+# nvidia-cublas-cu11
+# nvidia-cudnn-cu11
+# nvidia-cuda-nvrtc-cu11
+# nvidia-cufft-cu11
+# nvidia-curand-cu11
+# nvidia-cusolver-cu11
+# nvidia-cusparse-cu11
+
+# Modern face stack (RetinaFace + ArcFace)
+insightface==0.7.3
+onnx==1.16.0
+
+# Optional: monitor RAM/GPU during runs
+psutil==5.9.8
+
+# Use full opencv for video decode (headless is fine too)
+opencv-python==4.9.0.80
