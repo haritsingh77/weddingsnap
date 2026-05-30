@@ -15,11 +15,12 @@ app = FastAPI(title="WeddingSnap API", version="1.0.0")
 
 import os
 
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+ALLOWED_ORIGINS = [o.strip().strip("'\"") for o in os.getenv("ALLOWED_ORIGINS", "*").split(",")]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=r"https://weddingsnap-.*\.vercel\.app|https://weddingsnap-.*-projects\.vercel\.app|http://localhost(:\d+)?|http://127\.0\.0\.1(:\d+)?",
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
