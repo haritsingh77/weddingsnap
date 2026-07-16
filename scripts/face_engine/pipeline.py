@@ -77,6 +77,7 @@ class FacePipeline:
             return InsightFaceBackend(
                 model_name=self.config.insightface_model,
                 model_root=self.config.model_cache_dir,
+                det_size=self.config.det_size,
             )
         if choice == "dlib":
             return DlibBackend(model=self.config.dlib_model)

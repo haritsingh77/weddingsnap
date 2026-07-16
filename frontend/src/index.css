@@ -1,10 +1,12 @@
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&display=swap');
 @import "tailwindcss";
 
 @theme {
   --font-serif: "Playfair Display", Georgia, serif;
+  --font-script: "Cormorant Garamond", Georgia, serif;
   --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
-  
+
+  /* Champagne / gold — primary accent */
   --color-gold-50: #fbf8f2;
   --color-gold-100: #f6edd9;
   --color-gold-200: #ecdbb3;
@@ -15,47 +17,83 @@
   --color-gold-700: #805327;
   --color-gold-800: #664121;
   --color-gold-900: #54351d;
-  
+
+  /* Ivory — warm page canvas (replaces cold stone/white) */
+  --color-ivory-50: #fdfbf7;
+  --color-ivory-100: #faf6ee;
+  --color-ivory-200: #f3ebdd;
+
+  /* Blush — soft romantic secondary */
+  --color-blush-50: #fbf1ef;
+  --color-blush-100: #f6ded9;
+  --color-blush-200: #edc3ba;
+  --color-blush-300: #e0a294;
+  --color-blush-400: #cd7c6b;
+  --color-blush-500: #b25e4d;
+
+  /* Sage — botanical accent */
+  --color-sage-100: #e6ebe1;
+  --color-sage-200: #c8d3bf;
+  --color-sage-400: #93a687;
+  --color-sage-600: #647256;
+
+  /* Taupe — warm ink, softer than near-black stone-900 */
+  --color-taupe-700: #6b5a45;
+  --color-taupe-800: #574734;
+  --color-taupe-900: #3f3324;
+
   --animate-scan: scan 2s linear infinite;
   --animate-fade-in-up: fade-in-up 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   --animate-pulse-glow: pulse-glow 2.5s ease-in-out infinite;
 
   @keyframes scan {
-    0%, 100% {
-      top: 5%;
-    }
-    50% {
-      top: 95%;
-    }
+    0%, 100% { top: 5%; }
+    50% { top: 95%; }
   }
   @keyframes fade-in-up {
-    0% {
-      opacity: 0;
-      transform: translateY(15px);
-    }
-    100% {
-      opacity: 1;
-      transform: translateY(0);
-    }
+    0% { opacity: 0; transform: translateY(15px); }
+    100% { opacity: 1; transform: translateY(0); }
   }
   @keyframes pulse-glow {
-    0%, 100% {
-      transform: scale(1);
-      box-shadow: 0 0 0 0 rgba(204, 161, 87, 0.4);
-    }
-    50% {
-      transform: scale(1.02);
-      box-shadow: 0 0 16px 4px rgba(204, 161, 87, 0.15);
-    }
+    0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(204, 161, 87, 0.4); }
+    50% { transform: scale(1.02); box-shadow: 0 0 16px 4px rgba(204, 161, 87, 0.15); }
   }
 }
 
-/* Base styles and custom overrides */
 @layer base {
   body {
-    background-color: var(--color-gold-50);
+    background-color: var(--color-ivory-100);
     font-family: var(--font-sans);
-    color: var(--color-stone-800);
+    color: var(--color-taupe-800);
     -webkit-font-smoothing: antialiased;
+  }
+}
+
+@layer components {
+  /* Botanical divider: a hairline with a centered ornament. Usage:
+     <div class="ornament"><span>&#10047;</span></div>  (or an icon) */
+  .ornament {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    color: var(--color-gold-400);
+  }
+  .ornament::before,
+  .ornament::after {
+    content: "";
+    height: 1px;
+    width: 2.5rem;
+    background: linear-gradient(to var(--_dir, right), transparent, var(--color-gold-300));
+  }
+  .ornament::before { --_dir: left; }
+
+  /* Eyebrow label — the small tracked uppercase caption used across screens */
+  .eyebrow {
+    font-size: 0.7rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--color-gold-600);
+    font-weight: 500;
   }
 }

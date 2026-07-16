@@ -22,9 +22,16 @@ class InsightFaceBackend(FaceBackend):
     name = "insightface"
     embedding_dim = 512
 
-    def __init__(self, model_name: str = "buffalo_s", model_root: Path | None = None):
+    def __init__(
+        self,
+        model_name: str = "buffalo_l",
+        model_root: Path | None = None,
+        det_size: int | None = None,
+    ):
         self.model_name = model_name
         self.model_root = model_root
+        # Fall back to env/default when the caller doesn't pass one explicitly.
+        self.det_size = det_size or int(os.getenv("INSIGHTFACE_DET_SIZE", "1024"))
 
     def warmup(self) -> None:
         global _pipeline
@@ -45,8 +52,12 @@ class InsightFaceBackend(FaceBackend):
 
         log.info("Loading InsightFace model '%s' with providers: %s", self.model_name, providers)
         app = FaceAnalysis(name=self.model_name, providers=providers)
-        # det_size 640 is good balance for wedding photos on 4GB VRAM
-        app.prepare(ctx_id=0 if "CUDA" in str(providers) else -1, det_size=(640, 640))
+        # Larger det_size recovers small faces in group photos (see config.det_size).
+        app.prepare(
+            ctx_id=0 if "CUDA" in str(providers) else -1,
+            det_size=(self.det_size, self.det_size),
+        )
+        log.info("InsightFace det_size=%dx%d", self.det_size, self.det_size)
         _pipeline = app
         log.info("InsightFace ready (embedding dim=%d)", self.embedding_dim)
 

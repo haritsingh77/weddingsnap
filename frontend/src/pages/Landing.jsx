@@ -74,26 +74,28 @@ export default function Landing() {
     }
 
     return (
-        <div className="min-h-screen bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-amber-50/30 via-stone-50 to-stone-100/50 flex flex-col items-center justify-center px-4 py-12 select-none">
+        <div className="min-h-screen bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-blush-50/40 via-ivory-100 to-ivory-200/60 flex flex-col items-center justify-center px-4 py-12 select-none">
             {/* Header with Fade-In Animation */}
             <div className="text-center mb-10 animate-fade-in-up">
                 <img
                     src="/logo.png"
                     alt="Mahima & Saurav Wedding Logo"
-                    className="w-32 h-32 mx-auto mb-6 object-contain rounded-full shadow-lg shadow-gold-100/50 border border-gold-200/20 bg-white/40 backdrop-blur-xs p-1"
+                    className="w-32 h-32 mx-auto mb-6 object-contain rounded-full shadow-lg shadow-gold-100/50 border border-gold-200/30 bg-white/50 backdrop-blur-xs p-1"
                 />
-                <p className="text-xs font-medium tracking-[0.25em] text-gold-600 uppercase mb-3">You are invite-only guest</p>
-                <h1 className="text-5xl md:text-6xl font-serif text-stone-900 tracking-tight leading-tight">
-                    Mahima <span className="font-sans font-light text-stone-300 mx-2">&</span> Saurav
+                <p className="eyebrow mb-4">Together with their families</p>
+                <h1 className="font-script text-6xl md:text-7xl text-taupe-900 leading-none">
+                    Mahima <span className="italic text-gold-500 font-normal">&amp;</span> Saurav
                 </h1>
-                <div className="w-12 h-[1px] bg-gold-400 mx-auto my-5"></div>
-                <p className="text-stone-500 font-light text-sm tracking-wide">Find & download your wedding moments</p>
+                <div className="ornament my-6 max-w-[16rem] mx-auto">
+                    <span aria-hidden="true" className="text-lg leading-none">&#10047;</span>
+                </div>
+                <p className="text-taupe-700/80 font-light text-sm tracking-[0.15em] uppercase">Find &amp; keep your wedding moments</p>
             </div>
 
             {/* Premium Card */}
-            <div className="w-full max-w-md bg-white/70 backdrop-blur-md border border-white/60 rounded-3xl shadow-xl shadow-stone-200/40 p-8 md:p-10 flex flex-col gap-6 animate-fade-in-up [animation-delay:150ms]">
+            <div className="w-full max-w-md bg-ivory-50/80 backdrop-blur-md border border-gold-200/40 rounded-3xl shadow-xl shadow-gold-200/20 p-8 md:p-10 flex flex-col gap-6 animate-fade-in-up [animation-delay:150ms]">
                 <div className="flex flex-col gap-1">
-                    <label className="text-[10px] font-semibold text-stone-400 uppercase tracking-widest">Invite Code</label>
+                    <label className="text-[10px] font-semibold text-taupe-700/60 uppercase tracking-widest">Invite Code</label>
                     <input
                         name="code"
                         value={form.code}
@@ -137,19 +139,19 @@ export default function Landing() {
                 <button
                     onClick={submit}
                     disabled={loading}
-                    className="w-full bg-stone-900 text-white rounded-xl py-4 font-semibold text-sm tracking-widest uppercase hover:bg-gold-600 hover:shadow-lg hover:shadow-gold-500/25 active:scale-[0.98] transition-all duration-300 disabled:opacity-50 mt-2 cursor-pointer"
+                    className="w-full bg-taupe-800 text-ivory-50 rounded-xl py-4 font-semibold text-sm tracking-[0.2em] uppercase hover:bg-gold-600 hover:shadow-lg hover:shadow-gold-500/25 active:scale-[0.98] transition-all duration-300 disabled:opacity-50 mt-2 cursor-pointer"
                 >
                     {loading ? (
                         <span className="flex items-center justify-center gap-2">
-                            <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                            <span className="w-4 h-4 border-2 border-ivory-50/30 border-t-ivory-50 rounded-full animate-spin"></span>
                             Checking code...
                         </span>
                     ) : 'Enter Gallery'}
                 </button>
             </div>
 
-            <p className="text-stone-400 text-[10px] tracking-wider uppercase mt-8 animate-fade-in-up [animation-delay:300ms]">
-                🔒 Secure Guest Access • Private Gallery
+            <p className="text-taupe-700/50 text-[10px] tracking-[0.2em] uppercase mt-8 animate-fade-in-up [animation-delay:300ms]">
+                Secure guest access &middot; A private gallery
             </p>
         </div>
     )

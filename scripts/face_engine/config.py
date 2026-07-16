@@ -37,8 +37,17 @@ class PreprocessConfig:
     backend: str = field(
         default_factory=lambda: os.getenv("FACE_BACKEND", "auto").lower()
     )
+    # buffalo_l (ResNet50, far better identity separation) is strongly preferred
+    # for accuracy. buffalo_s (MobileFaceNet) is only worth it on very weak GPUs.
+    # Preprocessing is offline, so the extra inference cost is invisible to guests.
     insightface_model: str = field(
-        default_factory=lambda: os.getenv("INSIGHTFACE_MODEL", "buffalo_s")
+        default_factory=lambda: os.getenv("INSIGHTFACE_MODEL", "buffalo_l")
+    )
+    # RetinaFace detection resolution. Larger = detects small faces in big group
+    # shots (the main recall failure). 640 misses faces once a 6000px photo is
+    # downscaled; 1024 recovers most of them. Offline pass can afford it.
+    det_size: int = field(
+        default_factory=lambda: int(os.getenv("INSIGHTFACE_DET_SIZE", "1024"))
     )
     # hog | cnn — only used when backend is dlib
     dlib_model: str = field(
@@ -46,8 +55,9 @@ class PreprocessConfig:
     )
 
     # ── Image ─────────────────────────────────────────────────────────────────
+    # Raised from 1600 → 2048 so small faces survive the pre-detect downscale.
     max_image_dimension: int = field(
-        default_factory=lambda: int(os.getenv("MAX_IMAGE_DIMENSION", "1600"))
+        default_factory=lambda: int(os.getenv("MAX_IMAGE_DIMENSION", "2048"))
     )
 
     # ── Video ─────────────────────────────────────────────────────────────────

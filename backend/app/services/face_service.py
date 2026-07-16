@@ -97,6 +97,20 @@ def encode_selfie(image_bytes: bytes) -> Optional[np.ndarray]:
                 detections,
                 key=lambda d: (d.bbox[2] - d.bbox[0]) * (d.bbox[3] - d.bbox[1]),
             )
+            # Stricter quality gate for enrollment: a weak reference selfie
+            # degrades every subsequent match. Require a confident, reasonably
+            # sized face. (Gallery detection uses a looser 0.65 gate.)
+            import os
+            min_score = float(os.getenv("SELFIE_MIN_DET_SCORE", "0.72"))
+            min_px = int(os.getenv("SELFIE_MIN_FACE_PX", "110"))
+            face_w = largest.bbox[2] - largest.bbox[0]
+            face_h = largest.bbox[3] - largest.bbox[1]
+            if largest.det_score < min_score or min(face_w, face_h) < min_px:
+                log.info(
+                    "Selfie rejected: low quality (score=%.2f, size=%dx%d)",
+                    largest.det_score, face_w, face_h,
+                )
+                return None
             return largest.encoding
 
         import face_recognition
@@ -156,6 +170,41 @@ def get_flat_encodings():
     return np.array(flat_encodings), paths, backend
 
 
+def _aggregate_guest_encodings(
+    guest_encodings: List[np.ndarray], backend: str
+) -> List[np.ndarray]:
+    """
+    Combine a guest's multiple selfie embeddings into the query set used for matching.
+
+    Modes (env SELFIE_AGGREGATE):
+      - "centroid": mean of L2-normalized embeddings, renormalized → one robust
+        template. Best precision on look-alikes; a single bad angle can't fire
+        a false match on its own. Default for ArcFace.
+      - "min": keep every embedding, best (closest) angle wins. Highest recall,
+        lowest precision. Original behaviour.
+      - "both": centroid + all individual embeddings (union). Recall-leaning.
+
+    dlib (128-d L2) always uses "min" — its embeddings don't average cleanly.
+    """
+    import os
+
+    if len(guest_encodings) <= 1 or backend != "insightface":
+        return guest_encodings
+
+    mode = os.getenv("SELFIE_AGGREGATE", "centroid").lower()
+    if mode == "min":
+        return guest_encodings
+
+    stacked = np.array(guest_encodings, dtype=np.float64)
+    unit = stacked / (np.linalg.norm(stacked, axis=1, keepdims=True) + 1e-8)
+    centroid = unit.mean(axis=0)
+    centroid = centroid / (np.linalg.norm(centroid) + 1e-8)
+
+    if mode == "both":
+        return [centroid, *guest_encodings]
+    return [centroid]
+
+
 def find_matching_photos(
     guest_encodings: List[np.ndarray],
     tolerance: float = None,
@@ -164,6 +213,9 @@ def find_matching_photos(
     backend = _get_active_backend(all_records)
     if tolerance is None:
         tolerance = _match_tolerance(backend)
+
+    angles_captured = len(guest_encodings)
+    guest_encodings = _aggregate_guest_encodings(guest_encodings, backend)
 
     common_photos = [r["path"] for r in all_records if r.get("is_common", False)]
     personal_matches: dict[str, dict] = {}
@@ -216,7 +268,7 @@ def find_matching_photos(
         "total_matches": len(personal_photos),
         "common_count": len(common_photos),
         "confidence_map": confidence_map,
-        "selfie_angles_used": len(guest_encodings),
+        "selfie_angles_used": angles_captured,
         "match_backend": enc_backend,
     }
 
