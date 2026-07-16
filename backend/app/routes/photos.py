@@ -83,14 +83,21 @@ def get_drive_id_to_mime_map() -> dict[str, str]:
 # intercept all /photos/stream/... requests and treat "stream" as a guest ID.
 
 @router.get("/thumb/{file_id}")
-async def thumb_photo(file_id: str, size: int = 400):
+def thumb_photo(file_id: str, size: int = 400):
     """
     Returns thumbnail of photo/video.
     Cache hierarchy:
       1. Local L1 disk cache (fast, ephemeral)
-      2. Redirect directly to Supabase global CDN (Cloudflare) to bypass server proxy bottleneck
+      2. Supabase CDN redirect (if pre-cached)
+      3. Google Drive thumbnailLink redirect (instant, no download)
+      4. Last resort: full-res download from Drive + PIL resize (images only)
+
+    Deliberately a sync `def`: FastAPI runs it in a threadpool, keeping the
+    blocking I/O below (CDN HEAD check, Drive metadata call, last-resort
+    download) off the event loop.
     """
-    from app.services.drive_cache import LOCAL_CACHE_DIR
+    from app.services.drive_cache import LOCAL_CACHE_DIR, save_cached_file
+    from fastapi.responses import RedirectResponse, Response
     size = min(size, 2048)
     cache_key = f"thumb_{file_id}_{size}.jpg"
 
@@ -98,7 +105,6 @@ async def thumb_photo(file_id: str, size: int = 400):
     local_path = LOCAL_CACHE_DIR / cache_key
     if local_path.exists():
         try:
-            from fastapi.responses import Response
             return Response(
                 content=local_path.read_bytes(),
                 media_type="image/jpeg",
@@ -107,21 +113,28 @@ async def thumb_photo(file_id: str, size: int = 400):
         except Exception:
             pass
 
-    # ── 2. Bypasses proxy bottleneck: Redirect browser directly to Supabase CDN ──
-    from fastapi.responses import RedirectResponse
-    cdn_url = f"{settings.SUPABASE_URL}/storage/v1/object/public/weddingsnap-cache/{cache_key}"
-    return RedirectResponse(url=cdn_url, status_code=307)
+    # ── 2. Check Supabase Storage — redirect to CDN if pre-cached ─────────────
+    # Use a fast HEAD check rather than a full download to avoid latency.
+    try:
+        cdn_url = f"{settings.SUPABASE_URL}/storage/v1/object/public/weddingsnap-cache/{cache_key}"
+        import httpx
+        head = httpx.head(cdn_url, timeout=2.0)
+        if head.status_code == 200:
+            return RedirectResponse(url=cdn_url, status_code=307)
+    except Exception:
+        pass  # Supabase check failed — fall through to Drive
 
-    # ── 2. Generate from Google Drive CDN thumbnail link ──────────────────────
+    # ── 3. Use Google Drive thumbnailLink (instant redirect, no download) ──────
     try:
         from app.services.drive_service import execute_with_retry
         meta = execute_with_retry(lambda svc: svc.files().get(
             fileId=file_id,
-            fields='thumbnailLink,imageMediaMetadata,videoMediaMetadata'
+            fields='thumbnailLink,imageMediaMetadata,mimeType'
         ))
         link = meta.get('thumbnailLink')
 
         if link:
+            # Adjust thumbnail size in the Drive CDN URL
             if '=s220' in link:
                 adjusted_link = link.replace('=s220', f'=s{size}')
             elif '=' in link:
@@ -129,43 +142,42 @@ async def thumb_photo(file_id: str, size: int = 400):
             else:
                 adjusted_link = f"{link}=s{size}"
 
-            import requests as _req
-            res = _req.get(adjusted_link, timeout=10)
-            if res.status_code == 200:
-                from PIL import Image, ImageOps
-                import io as _io
+            # Redirect browser directly to Drive CDN — zero server bandwidth
+            # Also kick off a background thread to generate + cache a proper thumbnail
+            import threading
+            def _cache_thumb():
+                try:
+                    import httpx as _httpx
+                    import io as _io2
+                    # follow_redirects: unlike requests, httpx doesn't follow by default
+                    r2 = _httpx.get(adjusted_link, timeout=15.0, follow_redirects=True)
+                    if r2.status_code != 200:
+                        return
+                    from PIL import Image, ImageOps
+                    rot = 0
+                    if 'imageMediaMetadata' in meta:
+                        rot = meta['imageMediaMetadata'].get('rotation', 0)
+                    img = Image.open(_io2.BytesIO(r2.content))
+                    if rot:
+                        img = img.rotate(rot if rot > 4 else rot * 90, expand=True)
+                    else:
+                        img = ImageOps.exif_transpose(img)
+                    if img.mode in ("RGBA", "P"):
+                        img = img.convert("RGB")
+                    buf = _io2.BytesIO()
+                    img.save(buf, format="JPEG", quality=85, optimize=True)
+                    from app.services.drive_cache import save_cached_file
+                    save_cached_file(cache_key, buf.getvalue(), mime_type="image/jpeg")
+                except Exception as bg_err:
+                    log.debug(f"Background thumb cache failed for {file_id}: {bg_err}")
+            threading.Thread(target=_cache_thumb, daemon=True).start()
 
-                rot = 0
-                if 'imageMediaMetadata' in meta:
-                    rot = meta['imageMediaMetadata'].get('rotation', 0)
+            return RedirectResponse(url=adjusted_link, status_code=307)
 
-                img = Image.open(_io.BytesIO(res.content))
-                if rot:
-                    rot_deg = rot if rot > 4 else rot * 90
-                    img = img.rotate(rot_deg, expand=True)
-                else:
-                    img = ImageOps.exif_transpose(img)
-
-                if img.mode in ("RGBA", "P"):
-                    img = img.convert("RGB")
-
-                buf = _io.BytesIO()
-                img.save(buf, format="JPEG", quality=85, optimize=True)
-                thumb_data = buf.getvalue()
-
-                # Save to Drive cache (persistent) + local L1
-                save_cached_file(cache_key, thumb_data, mime_type="image/jpeg")
-
-                from fastapi.responses import Response
-                return Response(
-                    content=thumb_data,
-                    media_type="image/jpeg",
-                    headers={"Cache-Control": "private, max-age=86400"},
-                )
     except Exception as e:
-        log.warning(f"Could not fetch Google CDN thumbnail for {file_id}: {e}")
+        log.warning(f"Could not fetch Drive thumbnailLink for {file_id}: {e}")
 
-    # ── 3. Last resort: download full-res from Drive, resize with Pillow ──────
+    # ── 4. Last resort: download full-res from Drive, resize with Pillow ───────
     mime_map = get_drive_id_to_mime_map()
     mime_type = mime_map.get(file_id, "image/jpeg")
 
@@ -192,7 +204,6 @@ async def thumb_photo(file_id: str, size: int = 400):
 
         save_cached_file(cache_key, thumb_data, mime_type="image/jpeg")
 
-        from fastapi.responses import Response
         return Response(
             content=thumb_data,
             media_type="image/jpeg",
