@@ -108,9 +108,8 @@ async def register_face(
             if upserted.data:
                 drive_to_id = {p["drive_path"]: p["id"] for p in upserted.data}
 
-                from app.services.drive_cache import get_cached_json
-                disassociated = (get_cached_json("disassociated_photos.json") or {}).get(guest_id, [])
-                disassociated_set = set(disassociated)
+                from app.services.face_state import get_disassociated_photo_ids
+                disassociated_set = get_disassociated_photo_ids(guest_id)
 
                 # Build guest_photos mapping rows — use a set to deduplicate
                 seen_photo_ids: set[str] = set()

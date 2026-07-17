@@ -205,6 +205,74 @@ def _aggregate_guest_encodings(
     return [centroid]
 
 
+# ── Phase 1: in-database ANN matching (pgvector) ─────────────────────────────
+
+_db_faces_populated = False  # sticky once true; re-checked while false
+
+
+def _db_match_available() -> bool:
+    """True when the faces table exists and has rows (migration run + synced)."""
+    global _db_faces_populated
+    if _db_faces_populated:
+        return True
+    try:
+        from app.database import supabase
+        res = supabase.table("faces").select("id", count="exact").limit(1).execute()
+        if (res.count or 0) > 0:
+            _db_faces_populated = True
+    except Exception as e:
+        log.debug(f"faces table unavailable, using pkl matching: {e}")
+    return _db_faces_populated
+
+
+def _find_matching_photos_db(
+    guest_encodings: List[np.ndarray], tolerance: float
+) -> dict:
+    """
+    ANN matching via the match_faces() RPC (HNSW cosine search in Postgres).
+    Replaces the O(faces × selfies) Python loop. Returns filenames, so the
+    downstream resolve_drive_ids() flow is unchanged.
+    """
+    from app.database import supabase
+
+    best: dict[str, float] = {}
+    for enc in guest_encodings:
+        rows = supabase.rpc(
+            "match_faces",
+            {"q": np.asarray(enc, dtype=float).tolist(), "k": 1000},
+        ).execute()
+        for row in rows.data or []:
+            d = float(row["distance"])
+            if d <= tolerance:
+                fname = row["filename"]
+                if fname not in best or d < best[fname]:
+                    best[fname] = d
+
+    sorted_personal = sorted(best.items(), key=lambda x: x[1])
+    personal_photos = [f for f, _ in sorted_personal]
+    confidence_map = {
+        f: compute_confidence(d, tolerance, "insightface") for f, d in sorted_personal
+    }
+
+    common_res = (
+        supabase.table("photos")
+        .select("filename")
+        .eq("is_common", True)
+        .not_.is_("filename", "null")
+        .execute()
+    )
+    common_photos = [r["filename"] for r in common_res.data or []]
+
+    return {
+        "personal_photos": personal_photos,
+        "common_photos": common_photos,
+        "total_matches": len(personal_photos),
+        "common_count": len(common_photos),
+        "confidence_map": confidence_map,
+        "match_backend": "insightface",
+    }
+
+
 def find_matching_photos(
     guest_encodings: List[np.ndarray],
     tolerance: float = None,
@@ -216,6 +284,19 @@ def find_matching_photos(
 
     angles_captured = len(guest_encodings)
     guest_encodings = _aggregate_guest_encodings(guest_encodings, backend)
+
+    # Prefer in-database ANN matching when faces are synced (512-d ArcFace only).
+    if backend == "insightface" and _db_match_available():
+        try:
+            result = _find_matching_photos_db(guest_encodings, tolerance)
+            result["selfie_angles_used"] = angles_captured
+            log.info(
+                "DB match — %d personal, %d common (pgvector)",
+                result["total_matches"], result["common_count"],
+            )
+            return result
+        except Exception as e:
+            log.warning(f"DB matching failed, falling back to pkl scan: {e}")
 
     common_photos = [r["path"] for r in all_records if r.get("is_common", False)]
     personal_matches: dict[str, dict] = {}
@@ -365,9 +446,8 @@ def associate_guest_by_name(guest_id: str, name: str) -> int:
         ).execute()
 
         if upserted.data:
-            from app.services.drive_cache import get_cached_json
-            disassociated = (get_cached_json("disassociated_photos.json") or {}).get(guest_id, [])
-            disassociated_set = set(disassociated)
+            from app.services.face_state import get_disassociated_photo_ids
+            disassociated_set = get_disassociated_photo_ids(guest_id)
 
             drive_to_id = {p["drive_path"]: p["id"] for p in upserted.data}
             photo_rows = []

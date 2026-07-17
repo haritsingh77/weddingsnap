@@ -744,14 +744,9 @@ async def guest_not_me(drive_id: str, body: NotMeBody):
         
         photo_id = photo_res.data[0]["id"]
         
-        # 2. Add to disassociated list in cache to prevent future re-matching
-        from app.services.drive_cache import get_cached_json, save_cached_json
-        disassociated_data = get_cached_json("disassociated_photos.json") or {}
-        if guest_id not in disassociated_data:
-            disassociated_data[guest_id] = []
-        if photo_id not in disassociated_data[guest_id]:
-            disassociated_data[guest_id].append(photo_id)
-        save_cached_json("disassociated_photos.json", disassociated_data)
+        # 2. Record disassociation (typed row, safe under concurrency)
+        from app.services.face_state import add_disassociation
+        add_disassociation(guest_id, photo_id)
 
         # 3. Delete row from guest_photos mapping table
         supabase.table("guest_photos").delete().eq("guest_id", guest_id).eq("photo_id", photo_id).execute()

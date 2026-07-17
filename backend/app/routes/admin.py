@@ -212,8 +212,8 @@ async def update_guest_profile(
                     common_ids = resolve_drive_ids(match_result["common_photos"])
 
                     # Load disassociated photos
-                    disassociated = (get_cached_json("disassociated_photos.json") or {}).get(guest_id, [])
-                    disassociated_set = set(disassociated)
+                    from app.services.face_state import get_disassociated_photo_ids
+                    disassociated_set = get_disassociated_photo_ids(guest_id)
 
                     unique_photos = {}
                     for drive_id in personal_ids:
@@ -294,18 +294,19 @@ def get_guest_personal_photos(guest_id: str, x_admin_password: str = Header(...,
 
 @router.delete("/guests/{guest_id}/photos/{photo_id}")
 def remove_guest_photo(guest_id: str, photo_id: str, x_admin_password: str = Header(..., alias="x-admin-password")):
-    """Disassociate a photo from a guest's album permanently (adds to disassociated_photos.json cache)."""
+    """Disassociate a photo from a guest's album permanently (guest_photo_disassociations table)."""
     if x_admin_password != settings.ADMIN_PASSWORD:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    # Add to disassociated list to prevent future re-matching
-    from app.services.drive_cache import get_cached_json, save_cached_json
-    disassociated_data = get_cached_json("disassociated_photos.json") or {}
-    if guest_id not in disassociated_data:
-        disassociated_data[guest_id] = []
-    if photo_id not in disassociated_data[guest_id]:
-        disassociated_data[guest_id].append(photo_id)
-    save_cached_json("disassociated_photos.json", disassociated_data)
+    # Record disassociation as a typed row (the old JSON blob stored this
+    # path-param as a *string*, which never matched the int photo ids used at
+    # read time — admin disassociations silently didn't survive re-matching).
+    try:
+        photo_id_int = int(photo_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="photo_id must be numeric")
+    from app.services.face_state import add_disassociation
+    add_disassociation(guest_id, photo_id_int)
 
     # Delete row from guest_photos
     supabase.table("guest_photos").delete().eq("guest_id", guest_id).eq("photo_id", photo_id).execute()
@@ -343,8 +344,8 @@ def run_guest_matching(guest_id: str, tolerance: Optional[float] = None, x_admin
     common_ids = resolve_drive_ids(match_result["common_photos"])
 
     # Load disassociated photos
-    disassociated = (get_cached_json("disassociated_photos.json") or {}).get(guest_id, [])
-    disassociated_set = set(disassociated)
+    from app.services.face_state import get_disassociated_photo_ids
+    disassociated_set = get_disassociated_photo_ids(guest_id)
 
     # Save matches
     unique_photos = {}
@@ -398,7 +399,7 @@ def run_matching_all(tolerance: Optional[float] = None, x_admin_password: str = 
     # Clear face matching caches to ensure reload of fresh face encodings
     load_encodings.cache_clear()
 
-    disassociated_data = get_cached_json("disassociated_photos.json") or {}
+    from app.services.face_state import get_disassociated_photo_ids
 
     for guest in guests:
         guest_id = guest["id"]
@@ -414,7 +415,7 @@ def run_matching_all(tolerance: Optional[float] = None, x_admin_password: str = 
 
             personal_ids = resolve_drive_ids(match_result["personal_photos"])
             common_ids = resolve_drive_ids(match_result["common_photos"])
-            disassociated_set = set(disassociated_data.get(guest_id, []))
+            disassociated_set = get_disassociated_photo_ids(guest_id)
 
             unique_photos = {}
             for drive_id in personal_ids:
