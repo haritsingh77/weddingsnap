@@ -131,8 +131,8 @@ export default function Register() {
     if (!guestId) return null
 
     return (
-        <div className="min-h-screen bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-amber-50/30 via-stone-50 to-stone-100/50 flex flex-col items-center justify-center px-4 py-8 select-none">
-            <div className="w-full max-w-sm bg-white/70 backdrop-blur-md border border-white/60 rounded-3xl shadow-xl shadow-stone-200/40 p-8 flex flex-col gap-6 text-center animate-fade-in-up">
+        <div className="min-h-screen bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-blush-50/40 via-ivory-100 to-ivory-200/60 flex flex-col items-center justify-center px-4 py-8 select-none">
+            <div className="w-full max-w-sm bg-ivory-50/80 backdrop-blur-md border border-gold-200/40 rounded-3xl shadow-xl shadow-gold-200/20 p-8 flex flex-col gap-6 text-center animate-fade-in-up">
 
                 {/* Step 1: Intro */}
                 {step === 'intro' && (
@@ -142,30 +142,30 @@ export default function Register() {
                             alt="Mahima & Saurav Logo"
                             className="w-20 h-20 object-contain rounded-full shadow-md shadow-gold-100 border border-gold-200/10 bg-white p-0.5 mb-6"
                         />
-                        <h2 className="text-3xl font-serif text-stone-900 mb-2">
+                        <h2 className="text-3xl font-serif text-taupe-900 mb-2">
                             Welcome, {guestName?.split(' ')[0]}
                         </h2>
-                        <p className="text-stone-500 font-light text-sm leading-relaxed mb-8">
+                        <p className="text-taupe-700/70 font-light text-sm leading-relaxed mb-8">
                             Take a quick selfie, and we'll automatically scan our wedding gallery to find all the photos you are in.
                         </p>
 
                         <button
                             onClick={startCamera}
-                            className="w-full bg-stone-900 text-white rounded-xl py-4 font-semibold text-sm tracking-widest uppercase hover:bg-gold-600 hover:shadow-lg hover:shadow-gold-500/25 active:scale-[0.98] transition-all duration-300 cursor-pointer"
+                            className="w-full bg-taupe-800 text-ivory-50 rounded-xl py-4 font-semibold text-sm tracking-widest uppercase hover:bg-gold-600 hover:shadow-lg hover:shadow-gold-500/25 active:scale-[0.98] transition-all duration-300 cursor-pointer"
                         >
                             Start Scanner
                         </button>
 
                         <label
                             htmlFor="selfie-file-upload"
-                            className="w-full mt-3 bg-white border border-stone-200 text-stone-700 rounded-xl py-4 font-semibold text-sm tracking-widest uppercase hover:bg-stone-50 active:scale-[0.98] transition-all duration-300 cursor-pointer block text-center shadow-xs"
+                            className="w-full mt-3 bg-white/60 border border-gold-200/50 text-taupe-700 rounded-xl py-4 font-semibold text-sm tracking-[0.2em] uppercase hover:bg-white/90 active:scale-[0.98] transition-all duration-300 cursor-pointer block text-center shadow-xs"
                         >
                             📤 Choose from Gallery
                         </label>
 
                         <button
                             onClick={skipToGallery}
-                            className="w-full text-stone-400 text-xs font-medium py-3 hover:text-stone-600 transition-colors cursor-pointer underline-offset-2 hover:underline"
+                            className="w-full text-taupe-700/50 text-xs font-medium py-3 hover:text-taupe-800 transition-colors cursor-pointer underline-offset-2 hover:underline"
                         >
                             Skip selfie, browse all photos →
                         </button>
@@ -175,9 +175,9 @@ export default function Register() {
                 {/* Step 2: Camera Feed */}
                 {step === 'camera' && (
                     <div className="flex flex-col items-center w-full">
-                        <p className="text-stone-500 font-light text-xs tracking-wider uppercase mb-4">Fit your face inside the frame</p>
+                        <p className="text-taupe-700/70 font-light text-xs tracking-wider uppercase mb-4">Fit your face inside the frame</p>
 
-                        <div className="relative w-full aspect-[4/3] rounded-2xl overflow-hidden bg-stone-900 border border-stone-200/60 shadow-inner">
+                        <div className="relative w-full aspect-[4/3] rounded-2xl overflow-hidden bg-taupe-900 border border-gold-200/50 shadow-inner">
                             <video
                                 ref={videoRef}
                                 autoPlay
@@ -188,7 +188,7 @@ export default function Register() {
 
                             {/* Premium Gold Scanner Overlay */}
                             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                                <div className="w-40 h-52 border-2 border-gold-400/80 rounded-full ring-[999px] ring-stone-900/60 flex items-center justify-center">
+                                <div className="w-40 h-52 border-2 border-gold-400/80 rounded-full ring-[999px] ring-taupe-900/60 flex items-center justify-center">
                                     {/* Subtly animated scanner line */}
                                     <div className="absolute left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-gold-400 to-transparent shadow-[0_0_8px_#cca157] animate-scan" />
                                 </div>
@@ -200,13 +200,13 @@ export default function Register() {
                         <div className="flex w-full gap-3 mt-6">
                             <button
                                 onClick={() => { stopCamera(); setStep('intro'); }}
-                                className="flex-1 border border-stone-200 text-stone-500 bg-white/50 rounded-xl py-3.5 font-medium text-xs uppercase tracking-wider hover:bg-stone-50 transition cursor-pointer"
+                                className="flex-1 border border-gold-200/50 text-taupe-700 bg-ivory-50/60 rounded-xl py-3.5 font-medium text-xs uppercase tracking-wider hover:bg-white/80 transition cursor-pointer"
                             >
                                 Back
                             </button>
                             <button
                                 onClick={capture}
-                                className="flex-2 bg-stone-900 text-white rounded-xl py-3.5 font-semibold text-xs tracking-widest uppercase hover:bg-gold-600 hover:shadow-lg hover:shadow-gold-500/25 transition cursor-pointer"
+                                className="flex-2 bg-taupe-800 text-ivory-50 rounded-xl py-3.5 font-semibold text-xs tracking-widest uppercase hover:bg-gold-600 hover:shadow-lg hover:shadow-gold-500/25 transition cursor-pointer"
                             >
                                 Capture Photo
                             </button>
@@ -217,9 +217,9 @@ export default function Register() {
                 {/* Step 3: Photo Preview */}
                 {step === 'preview' && (
                     <div className="flex flex-col items-center w-full">
-                        <p className="text-stone-500 font-light text-xs tracking-wider uppercase mb-4">Confirm your selfie</p>
+                        <p className="text-taupe-700/70 font-light text-xs tracking-wider uppercase mb-4">Confirm your selfie</p>
 
-                        <div className="w-full aspect-[4/3] rounded-2xl overflow-hidden bg-stone-900 border border-stone-200/60 shadow-lg">
+                        <div className="w-full aspect-[4/3] rounded-2xl overflow-hidden bg-taupe-900 border border-gold-200/50 shadow-lg">
                             <img
                                 src={preview}
                                 alt="Selfie preview"
@@ -230,13 +230,13 @@ export default function Register() {
                         <div className="flex w-full gap-3 mt-6">
                             <button
                                 onClick={retake}
-                                className="flex-1 border border-stone-200 text-stone-500 bg-white/50 rounded-xl py-3.5 font-medium text-xs uppercase tracking-wider hover:bg-stone-50 transition cursor-pointer"
+                                className="flex-1 border border-gold-200/50 text-taupe-700 bg-ivory-50/60 rounded-xl py-3.5 font-medium text-xs uppercase tracking-wider hover:bg-white/80 transition cursor-pointer"
                             >
                                 Retake
                             </button>
                             <button
                                 onClick={submit}
-                                className="flex-2 bg-stone-900 text-white rounded-xl py-3.5 font-semibold text-xs tracking-widest uppercase hover:bg-gold-600 hover:shadow-lg hover:shadow-gold-500/25 transition cursor-pointer"
+                                className="flex-2 bg-taupe-800 text-ivory-50 rounded-xl py-3.5 font-semibold text-xs tracking-widest uppercase hover:bg-gold-600 hover:shadow-lg hover:shadow-gold-500/25 transition cursor-pointer"
                             >
                                 Find My Photos
                             </button>
@@ -251,8 +251,8 @@ export default function Register() {
                             🔍
                             <div className="absolute inset-0 border border-gold-400 rounded-full animate-ping opacity-40" />
                         </div>
-                        <h2 className="text-2xl font-serif text-stone-950 mb-2">Analyzing Photos</h2>
-                        <p className="text-stone-400 font-light text-sm max-w-[280px] leading-relaxed mb-6">
+                        <h2 className="text-2xl font-serif text-taupe-900 mb-2">Analyzing Photos</h2>
+                        <p className="text-taupe-700/60 font-light text-sm max-w-[280px] leading-relaxed mb-6">
                             Matching your face details across all raw high-res wedding photos...
                         </p>
 
@@ -261,7 +261,7 @@ export default function Register() {
                                 🌟 Matched: {matchInfo.personal_count} of yours & {matchInfo.common_count} group photos!
                             </div>
                         ) : (
-                            <div className="w-32 bg-stone-100 rounded-full h-1.5 overflow-hidden">
+                            <div className="w-32 bg-gold-100 rounded-full h-1.5 overflow-hidden">
                                 <div className="bg-gold-500 h-full w-2/3 rounded-full animate-[loading_1.5s_ease-in-out_infinite]" style={{
                                     animationName: 'shimmer',
                                     animationDuration: '1.5s',
@@ -285,28 +285,28 @@ export default function Register() {
                         <div className="w-16 h-16 bg-red-50 border border-red-100 rounded-full flex items-center justify-center text-3xl mb-6">
                             😕
                         </div>
-                        <h2 className="text-2xl font-serif text-stone-900 mb-2">Let's Try Again</h2>
+                        <h2 className="text-2xl font-serif text-taupe-900 mb-2">Let's Try Again</h2>
                         <p className="text-red-400 font-medium text-xs leading-relaxed max-w-[260px] mb-8">
                             {error}
                         </p>
 
                         <button
                             onClick={() => setStep('intro')}
-                            className="w-full bg-stone-900 text-white rounded-xl py-4 font-semibold text-sm tracking-widest uppercase hover:bg-gold-600 hover:shadow-lg hover:shadow-gold-500/25 active:scale-[0.98] transition-all duration-300 cursor-pointer"
+                            className="w-full bg-taupe-800 text-ivory-50 rounded-xl py-4 font-semibold text-sm tracking-widest uppercase hover:bg-gold-600 hover:shadow-lg hover:shadow-gold-500/25 active:scale-[0.98] transition-all duration-300 cursor-pointer"
                         >
                             Retry Scanner
                         </button>
 
                         <label
                             htmlFor="selfie-file-upload"
-                            className="w-full mt-3 bg-white border border-stone-200 text-stone-700 rounded-xl py-4 font-semibold text-sm tracking-widest uppercase hover:bg-stone-50 active:scale-[0.98] transition-all duration-300 cursor-pointer block text-center shadow-xs"
+                            className="w-full mt-3 bg-white/60 border border-gold-200/50 text-taupe-700 rounded-xl py-4 font-semibold text-sm tracking-[0.2em] uppercase hover:bg-white/90 active:scale-[0.98] transition-all duration-300 cursor-pointer block text-center shadow-xs"
                         >
                             📤 Choose from Gallery
                         </label>
 
                         <button
                             onClick={skipToGallery}
-                            className="w-full text-stone-400 text-xs font-medium py-3 hover:text-stone-600 transition-colors cursor-pointer underline-offset-2 hover:underline"
+                            className="w-full text-taupe-700/50 text-xs font-medium py-3 hover:text-taupe-800 transition-colors cursor-pointer underline-offset-2 hover:underline"
                         >
                             Browse without selfie →
                         </button>

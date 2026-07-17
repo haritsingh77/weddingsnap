@@ -103,8 +103,8 @@ export default function Download() {
     if (!guestId) return null
 
     return (
-        <div className="min-h-screen bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-amber-50/30 via-stone-50 to-stone-100/50 flex flex-col items-center justify-center px-4 py-12 select-none animate-fade-in-up">
-            <div className="w-full max-w-sm bg-white/70 backdrop-blur-md border border-white/60 rounded-3xl shadow-xl shadow-stone-200/40 p-8 md:p-10 text-center">
+        <div className="min-h-screen bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-blush-50/40 via-ivory-100 to-ivory-200/60 flex flex-col items-center justify-center px-4 py-12 select-none animate-fade-in-up">
+            <div className="w-full max-w-sm bg-ivory-50/80 backdrop-blur-md border border-gold-200/40 rounded-3xl shadow-xl shadow-gold-200/20 p-8 md:p-10 text-center">
 
                 {/* State: Idle / Start */}
                 {status === 'idle' && (
@@ -114,23 +114,23 @@ export default function Download() {
                             alt="Logo"
                             className="w-20 h-20 object-contain rounded-full shadow-md shadow-gold-100 border border-gold-200/10 bg-white p-0.5 mb-6"
                         />
-                        <h2 className="text-3xl font-serif text-stone-900 mb-2">
+                        <h2 className="text-3xl font-serif text-taupe-900 mb-2">
                             Download Gallery
                         </h2>
-                        <p className="text-stone-500 font-light text-sm leading-relaxed mb-8">
+                        <p className="text-taupe-700/70 font-light text-sm leading-relaxed mb-8">
                             We will bundle all of your matched personal photos and common group photos into a single, high-quality ZIP file.
                         </p>
                         
                         <button
                             onClick={start}
-                            className="w-full bg-stone-900 text-white rounded-xl py-4 font-semibold text-sm tracking-widest uppercase hover:bg-gold-600 hover:shadow-lg hover:shadow-gold-500/25 active:scale-[0.98] transition-all duration-300 cursor-pointer"
+                            className="w-full bg-taupe-800 text-ivory-50 rounded-xl py-4 font-semibold text-sm tracking-[0.2em] uppercase hover:bg-gold-600 hover:shadow-lg hover:shadow-gold-500/25 active:scale-[0.98] transition-all duration-300 cursor-pointer"
                         >
                             Prepare My Bundle
                         </button>
                         
                         <button
                             onClick={() => navigate('/gallery')}
-                            className="mt-4 text-xs font-semibold text-stone-400 uppercase tracking-widest hover:text-stone-600 transition cursor-pointer"
+                            className="mt-4 text-xs font-semibold text-taupe-700/50 uppercase tracking-widest hover:text-taupe-800 transition cursor-pointer"
                         >
                             ← Back to Gallery
                         </button>
@@ -144,9 +144,9 @@ export default function Download() {
                             ⏳
                             <div className="absolute inset-0 border border-gold-400 rounded-full animate-ping opacity-30" />
                         </div>
-                        <h2 className="text-2xl font-serif text-stone-950 mb-3">Bundling Memories</h2>
+                        <h2 className="text-2xl font-serif text-taupe-900 mb-3">Bundling Memories</h2>
                         
-                        <p className="text-stone-400 font-light text-xs max-w-[280px] min-h-[36px] leading-relaxed mb-6">
+                        <p className="text-taupe-700/60 font-light text-xs max-w-[280px] min-h-[36px] leading-relaxed mb-6">
                             {progressSteps[currentStep]}
                         </p>
                         
@@ -156,7 +156,7 @@ export default function Download() {
                                 <div
                                     key={i}
                                     className={`h-1.5 flex-1 rounded-full transition-all duration-500 ${
-                                        i <= currentStep ? 'bg-gold-500 shadow-[0_0_4px_#cca157]' : 'bg-stone-200'
+                                        i <= currentStep ? 'bg-gold-500 shadow-[0_0_4px_#cca157]' : 'bg-gold-100'
                                     }`}
                                 />
                             ))}
@@ -170,21 +170,21 @@ export default function Download() {
                         <div className="w-16 h-16 bg-emerald-50 border border-emerald-100 rounded-full flex items-center justify-center text-3xl mb-6">
                             ✅
                         </div>
-                        <h2 className="text-2xl font-serif text-stone-900 mb-2">Package Ready!</h2>
-                        <p className="text-stone-500 font-light text-sm mb-8">
-                            We've successfully bundled <span className="font-semibold text-stone-900">{photoCount} high-resolution photos</span> for you, {guestName?.split(' ')[0]}.
+                        <h2 className="text-2xl font-serif text-taupe-900 mb-2">Package Ready!</h2>
+                        <p className="text-taupe-700/70 font-light text-sm mb-8">
+                            We've successfully bundled <span className="font-semibold text-taupe-900">{photoCount} high-resolution photos</span> for you, {guestName?.split(' ')[0]}.
                         </p>
                         
                         <button
                             onClick={downloadZip}
-                            className="w-full bg-stone-900 text-white rounded-xl py-4 font-semibold text-sm tracking-widest uppercase hover:bg-gold-600 hover:shadow-lg hover:shadow-gold-500/25 active:scale-[0.98] transition-all duration-300 cursor-pointer shadow-md"
+                            className="w-full bg-taupe-800 text-ivory-50 rounded-xl py-4 font-semibold text-sm tracking-[0.2em] uppercase hover:bg-gold-600 hover:shadow-lg hover:shadow-gold-500/25 active:scale-[0.98] transition-all duration-300 cursor-pointer shadow-md"
                         >
                             Download ZIP
                         </button>
 
                         <button
                             onClick={() => navigate('/gallery')}
-                            className="mt-4 text-xs font-semibold text-stone-400 uppercase tracking-widest hover:text-stone-600 transition cursor-pointer"
+                            className="mt-4 text-xs font-semibold text-taupe-700/50 uppercase tracking-widest hover:text-taupe-800 transition cursor-pointer"
                         >
                             ← Back to Gallery
                         </button>
@@ -197,14 +197,14 @@ export default function Download() {
                         <div className="w-16 h-16 bg-red-50 border border-red-100 rounded-full flex items-center justify-center text-3xl mb-6">
                             ❌
                         </div>
-                        <h2 className="text-2xl font-serif text-stone-900 mb-2">Bundling Failed</h2>
-                        <p className="text-stone-500 font-light text-sm leading-relaxed mb-8">
+                        <h2 className="text-2xl font-serif text-taupe-900 mb-2">Bundling Failed</h2>
+                        <p className="text-taupe-700/70 font-light text-sm leading-relaxed mb-8">
                             We hit an issue while downloading or zipping your photo archive. Please try again.
                         </p>
                         
                         <button
                             onClick={() => setStatus('idle')}
-                            className="w-full bg-stone-900 text-white rounded-xl py-4 font-semibold text-sm tracking-widest uppercase hover:bg-gold-600 hover:shadow-lg hover:shadow-gold-500/25 active:scale-[0.98] transition-all duration-300 cursor-pointer"
+                            className="w-full bg-taupe-800 text-ivory-50 rounded-xl py-4 font-semibold text-sm tracking-[0.2em] uppercase hover:bg-gold-600 hover:shadow-lg hover:shadow-gold-500/25 active:scale-[0.98] transition-all duration-300 cursor-pointer"
                         >
                             Try Again
                         </button>

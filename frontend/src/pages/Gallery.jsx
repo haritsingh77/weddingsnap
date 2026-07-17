@@ -97,10 +97,10 @@ function GalleryPhotoCard({
             }}
             onMouseEnter={handleMouseEnter}
             onMouseLeave={handleMouseLeave}
-            className={`aspect-square relative group overflow-hidden bg-stone-100 border rounded-2xl shadow-sm hover:shadow-md cursor-pointer transition-all duration-300 animate-fade-in-up ${
+            className={`aspect-square relative group overflow-hidden bg-ivory-200 border rounded-2xl shadow-sm hover:shadow-md cursor-pointer transition-all duration-300 animate-fade-in-up ${
                 isSelected 
                     ? 'border-gold-500 ring-2 ring-gold-550/30 scale-[0.98]' 
-                    : 'border-stone-200/40 hover:border-gold-200'
+                    : 'border-gold-200/60/40 hover:border-gold-200'
             } ${hoverProgress > 0 ? 'scale-[1.01] ring-1 ring-gold-400/40' : ''}`}
             style={{ animationDelay: `${(index % 6) * 50}ms` }}
         >
@@ -135,7 +135,7 @@ function GalleryPhotoCard({
             )}
 
             {photo.is_video ? (
-                <div className="w-full h-full relative bg-stone-950 flex flex-col items-center justify-center overflow-hidden">
+                <div className="w-full h-full relative bg-taupe-900 flex flex-col items-center justify-center overflow-hidden">
                     {/* Video first-frame thumbnail background */}
                     <img
                         src={`${API_BASE}${photo.thumb_url}`}
@@ -152,7 +152,7 @@ function GalleryPhotoCard({
                         <div className="w-11 h-11 rounded-full bg-gold-400/10 border border-gold-400/30 flex items-center justify-center text-gold-300 text-base shadow-inner">
                             🎬
                         </div>
-                        <span className="text-[9px] text-stone-400 font-semibold tracking-widest uppercase">Play video</span>
+                        <span className="text-[9px] text-taupe-400 font-semibold tracking-widest uppercase">Play video</span>
                     </div>
                     
                     {/* Film strip luxury side borders */}
@@ -178,17 +178,17 @@ function GalleryPhotoCard({
             
             {/* Subtle Hover Overlay */}
             {!isMultiSelectMode && (
-                <div className="absolute inset-0 bg-gradient-to-t from-stone-950/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end justify-between p-3.5">
+                <div className="absolute inset-0 bg-gradient-to-t from-taupe-900/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end justify-between p-3.5">
                     <span className="text-[10px] font-semibold text-white/95 uppercase tracking-wider">
                         {photo.is_video ? '🎥 Video' : photo.is_common ? '👥 Group Shot' : '👤 Personal'}
                     </span>
                     <button
                         onClick={(e) => downloadSinglePhoto(photo, e)}
-                        className="w-8 h-8 rounded-full bg-white/90 hover:bg-white text-stone-800 flex items-center justify-center shadow transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer"
+                        className="w-8 h-8 rounded-full bg-white/90 hover:bg-white text-taupe-800 flex items-center justify-center shadow transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer"
                         disabled={downloadingPhoto === photo.drive_id}
                     >
                         {downloadingPhoto === photo.drive_id ? (
-                            <span className="w-3.5 h-3.5 border-2 border-stone-800/30 border-t-stone-800 rounded-full animate-spin"></span>
+                            <span className="w-3.5 h-3.5 border-2 border-taupe-800/30 border-t-stone-800 rounded-full animate-spin"></span>
                         ) : '⬇'}
                     </button>
                 </div>
@@ -196,11 +196,11 @@ function GalleryPhotoCard({
 
             {/* Badges for mobile */}
             {photo.is_video ? (
-                <div className="absolute top-2 right-2 md:hidden bg-stone-900/60 backdrop-blur-sm text-white text-[9px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider">
+                <div className="absolute top-2 right-2 md:hidden bg-taupe-800/60 backdrop-blur-sm text-white text-[9px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider">
                     Video
                 </div>
             ) : photo.is_common ? (
-                <div className="absolute top-2 right-2 md:hidden bg-stone-900/60 backdrop-blur-sm text-white text-[9px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider">
+                <div className="absolute top-2 right-2 md:hidden bg-taupe-800/60 backdrop-blur-sm text-white text-[9px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider">
                     Group
                 </div>
             ) : null}
@@ -820,10 +820,10 @@ export default function Gallery() {
 
     return (
         <>
-            <div className="min-h-screen bg-stone-50/70 select-none pb-12 animate-fade-in-up">
+            <div className="min-h-screen bg-ivory-100/70 select-none pb-12 animate-fade-in-up">
             
             {/* Elegant Header */}
-            <div className="bg-white/80 backdrop-blur-md border-b border-stone-200/50 px-6 py-6 sticky top-0 z-20">
+            <div className="bg-white/80 backdrop-blur-md border-b border-gold-200/60/50 px-6 py-6 sticky top-0 z-20">
                 <div className="max-w-4xl mx-auto flex items-center justify-between">
                     <div className="flex items-center gap-4">
                         <img
@@ -832,8 +832,8 @@ export default function Gallery() {
                             className="w-14 h-14 object-contain rounded-full shadow-md shadow-gold-100 border border-gold-200/10 bg-white p-0.5"
                         />
                         <div>
-                            <h1 className="font-serif text-stone-900 text-xl tracking-tight leading-none mb-1.5">{eventName || 'Wedding Gallery'}</h1>
-                            <p className="text-stone-400 text-xs tracking-wide">
+                            <h1 className="font-serif text-taupe-900 text-xl tracking-tight leading-none mb-1.5">{eventName || 'Wedding Gallery'}</h1>
+                            <p className="text-taupe-400 text-xs tracking-wide">
                                 {total > 0 ? `${total} matched moments found for ${guestName?.split(' ')[0]}` : 'Matching moments...'}
                             </p>
                         </div>
@@ -842,13 +842,13 @@ export default function Gallery() {
                     <div className="flex gap-2">
                         <button
                             onClick={() => navigate('/register')}
-                            className="bg-white border border-stone-200 text-stone-700 text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-stone-50 hover:border-stone-300 transition-all duration-300 cursor-pointer"
+                            className="bg-white border border-gold-200/60 text-taupe-700 text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-ivory-100 hover:border-gold-200 transition-all duration-300 cursor-pointer"
                         >
                             📸 Re-Scan Face
                         </button>
                         <button
                             onClick={() => navigate('/download')}
-                            className="bg-stone-900 text-white text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-gold-600 hover:shadow-lg hover:shadow-gold-500/20 transition-all duration-300 cursor-pointer"
+                            className="bg-taupe-800 text-white text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-gold-600 hover:shadow-lg hover:shadow-gold-500/20 transition-all duration-300 cursor-pointer"
                         >
                             Download All
                         </button>
@@ -856,7 +856,7 @@ export default function Gallery() {
                 </div>
 
                 {/* Aesthetic Navigation Tabs */}
-                <div className="max-w-4xl mx-auto flex gap-6 mt-6 border-t border-stone-100 pt-4 overflow-x-auto whitespace-nowrap scrollbar-none">
+                <div className="max-w-4xl mx-auto flex gap-6 mt-6 border-t border-gold-100 pt-4 overflow-x-auto whitespace-nowrap scrollbar-none">
                     {['all', 'mine', 'common', 'people', 'categories'].filter(t => t !== 'people' || isAdmin).map(t => (
                         <button
                             key={t}
@@ -869,8 +869,8 @@ export default function Gallery() {
                                 setActiveFamilyMemberId(null)
                             }}
                             className={`text-xs uppercase tracking-widest font-semibold pb-1.5 border-b-2 transition-all duration-300 cursor-pointer ${tab === t
-                                    ? 'border-gold-500 text-stone-900'
-                                    : 'border-transparent text-stone-300 hover:text-stone-500'
+                                    ? 'border-gold-500 text-taupe-900'
+                                    : 'border-transparent text-taupe-300 hover:text-taupe-500'
                                 }`}
                         >
                             {t === 'all' ? 'All Moments' : t === 'mine' ? 'Just Me' : t === 'common' ? 'Group Moments' : t === 'people' ? 'People' : 'Albums'}
@@ -897,8 +897,8 @@ export default function Gallery() {
                         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-6 md:gap-8">
                             {[...Array(5)].map((_, i) => (
                                 <div key={i} className="flex flex-col items-center gap-3 animate-pulse">
-                                    <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full bg-stone-200/60" />
-                                    <div className="h-3 w-16 bg-stone-200/60 rounded" />
+                                    <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full bg-gold-100/60" />
+                                    <div className="h-3 w-16 bg-gold-100/60 rounded" />
                                     <div className="h-2.5 w-12 bg-stone-150/60 rounded" />
                                 </div>
                             ))}
@@ -906,18 +906,18 @@ export default function Gallery() {
                     ) : clusters.length === 0 ? (
                         <div className="text-center py-20 flex flex-col items-center gap-4 animate-fade-in-up">
                             <div className="text-4xl">👥</div>
-                            <h3 className="font-serif text-stone-800 text-lg">No recognized faces yet</h3>
-                            <p className="text-stone-400 font-light text-sm max-w-xs leading-relaxed">
+                            <h3 className="font-serif text-taupe-800 text-lg">No recognized faces yet</h3>
+                            <p className="text-taupe-400 font-light text-sm max-w-xs leading-relaxed">
                                 Once face preprocessing is complete, clusters of all guests will appear here.
                             </p>
                         </div>
                     ) : (
                         <div className="space-y-6">
                             {isAdmin && (
-                                <div className="flex justify-between items-center mb-6 pb-2 border-b border-stone-200/50">
+                                <div className="flex justify-between items-center mb-6 pb-2 border-b border-gold-200/60/50">
                                     <div>
-                                        <h2 className="font-serif text-stone-900 text-base">Group Face Folders</h2>
-                                        <p className="text-stone-400 text-xs mt-0.5">Combine raw face clusters together.</p>
+                                        <h2 className="font-serif text-taupe-900 text-base">Group Face Folders</h2>
+                                        <p className="text-taupe-400 text-xs mt-0.5">Combine raw face clusters together.</p>
                                     </div>
                                     <div className="flex gap-2">
                                         {isMergeMode ? (
@@ -927,7 +927,7 @@ export default function Gallery() {
                                                         setIsMergeMode(false)
                                                         setSelectedClusterIds([])
                                                     }}
-                                                    className="bg-white border border-stone-200 text-stone-600 text-xs font-semibold px-3 py-1.5 rounded-xl hover:bg-stone-50 cursor-pointer"
+                                                    className="bg-white border border-gold-200/60 text-taupe-600 text-xs font-semibold px-3 py-1.5 rounded-xl hover:bg-ivory-100 cursor-pointer"
                                                 >
                                                     Cancel
                                                 </button>
@@ -939,7 +939,7 @@ export default function Gallery() {
                                                         }
                                                         handleMergeSubmit(selectedClusterIds[0])
                                                     }}
-                                                    className="bg-stone-900 text-white text-xs font-semibold px-3 py-1.5 rounded-xl hover:bg-gold-650 cursor-pointer shadow-sm disabled:opacity-50"
+                                                    className="bg-taupe-800 text-white text-xs font-semibold px-3 py-1.5 rounded-xl hover:bg-gold-650 cursor-pointer shadow-sm disabled:opacity-50"
                                                     disabled={selectedClusterIds.length < 2}
                                                 >
                                                     Merge Selected ({selectedClusterIds.length})
@@ -948,7 +948,7 @@ export default function Gallery() {
                                         ) : (
                                             <button
                                                 onClick={() => setIsMergeMode(true)}
-                                                className="bg-white border border-stone-200 text-stone-700 text-xs font-semibold px-3.5 py-2 rounded-xl hover:bg-stone-50 cursor-pointer"
+                                                className="bg-white border border-gold-200/60 text-taupe-700 text-xs font-semibold px-3.5 py-2 rounded-xl hover:bg-ivory-100 cursor-pointer"
                                             >
                                                 👥 Merge Faces
                                             </button>
@@ -974,7 +974,7 @@ export default function Gallery() {
                                             <img
                                                 src={`${API_BASE}${cluster.thumbnail_url}`}
                                                 alt=""
-                                                className="w-full h-full object-cover bg-stone-100"
+                                                className="w-full h-full object-cover bg-ivory-200"
                                                 loading="lazy"
                                             />
                                             {isMergeMode && (
@@ -1010,7 +1010,7 @@ export default function Gallery() {
                                                         type="text"
                                                         value={newName}
                                                         onChange={(e) => setNewName(e.target.value)}
-                                                        className="w-20 text-center text-xs border border-stone-300 rounded px-1 py-0.5 bg-white text-stone-800 focus:outline-none focus:border-gold-500"
+                                                        className="w-20 text-center text-xs border border-gold-200 rounded px-1 py-0.5 bg-white text-taupe-800 focus:outline-none focus:border-gold-500"
                                                         autoFocus
                                                     />
                                                     <button
@@ -1031,7 +1031,7 @@ export default function Gallery() {
                                                 <div className="flex items-center justify-center gap-1 mt-0.5 group/name">
                                                     <span 
                                                         onClick={() => handleClusterClick(cluster.id)}
-                                                        className="text-xs font-semibold text-stone-800 hover:text-gold-600 transition-colors cursor-pointer"
+                                                        className="text-xs font-semibold text-taupe-800 hover:text-gold-600 transition-colors cursor-pointer"
                                                     >
                                                         {cluster.name || `Person #${cluster.id}`}
                                                     </span>
@@ -1041,7 +1041,7 @@ export default function Gallery() {
                                                                 setEditingClusterId(cluster.id)
                                                                 setNewName(cluster.name || `Person #${cluster.id}`)
                                                             }}
-                                                            className="text-stone-400 hover:text-gold-600 transition-colors text-[10px] opacity-0 group-hover/name:opacity-100 group-hover:opacity-100 focus:opacity-100 cursor-pointer"
+                                                            className="text-taupe-400 hover:text-gold-600 transition-colors text-[10px] opacity-0 group-hover/name:opacity-100 group-hover:opacity-100 focus:opacity-100 cursor-pointer"
                                                             title="Rename person"
                                                         >
                                                             ✏️
@@ -1049,7 +1049,7 @@ export default function Gallery() {
                                                     )}
                                                 </div>
                                             )}
-                                            <p className="text-[10px] text-stone-400 uppercase tracking-wider mt-0.5">
+                                            <p className="text-[10px] text-taupe-400 uppercase tracking-wider mt-0.5">
                                                 {cluster.count} {cluster.count === 1 ? 'Moment' : 'Moments'}
                                             </p>
                                         </div>
@@ -1067,15 +1067,15 @@ export default function Gallery() {
                         onDragOver={(e) => e.preventDefault()}
                         onDrop={(e) => handleDrop(e, null)}
                     >
-                        <div className="flex justify-between items-center border-b border-stone-200/50 pb-4">
+                        <div className="flex justify-between items-center border-b border-gold-200/60/50 pb-4">
                             <div>
-                                <h2 className="font-serif text-stone-900 text-lg">Dynamic Albums</h2>
-                                <p className="text-stone-400 text-xs mt-0.5">Drag & drop files or folders anywhere to upload.</p>
+                                <h2 className="font-serif text-taupe-900 text-lg">Dynamic Albums</h2>
+                                <p className="text-taupe-400 text-xs mt-0.5">Drag & drop files or folders anywhere to upload.</p>
                             </div>
                             {isAdmin && (
                                 <button
                                     onClick={() => setShowCreateCategoryModal(true)}
-                                    className="bg-stone-900 text-white text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-gold-600 transition-all duration-300 cursor-pointer"
+                                    className="bg-taupe-800 text-white text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-gold-600 transition-all duration-300 cursor-pointer"
                                 >
                                     + Create Album
                                 </button>
@@ -1084,11 +1084,11 @@ export default function Gallery() {
 
                         {/* Uploading Status */}
                         {uploadingFiles.length > 0 && (
-                            <div className="bg-white border border-stone-200/80 rounded-2xl p-4 shadow-lg flex flex-col gap-2 animate-fade-in-up">
-                                <h4 className="text-xs font-bold text-stone-500 uppercase tracking-wider">Uploading Files...</h4>
+                            <div className="bg-white border border-gold-200/60/80 rounded-2xl p-4 shadow-lg flex flex-col gap-2 animate-fade-in-up">
+                                <h4 className="text-xs font-bold text-taupe-500 uppercase tracking-wider">Uploading Files...</h4>
                                 <div className="max-h-32 overflow-y-auto space-y-1.5 font-mono text-[10px]">
                                     {uploadingFiles.map((file, idx) => (
-                                        <div key={idx} className="flex justify-between items-center text-stone-700">
+                                        <div key={idx} className="flex justify-between items-center text-taupe-700">
                                             <span className="truncate max-w-[70%]">{file.name}</span>
                                             <span className={`font-semibold uppercase tracking-wider ${
                                                 file.status === 'success' ? 'text-green-600' :
@@ -1106,27 +1106,27 @@ export default function Gallery() {
                         {loadingCategories ? (
                             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 md:gap-6">
                                 {[...Array(3)].map((_, i) => (
-                                    <div key={i} className="aspect-[4/3] bg-stone-200/50 border border-stone-100/50 rounded-2xl animate-pulse" />
+                                    <div key={i} className="aspect-[4/3] bg-gold-100/50 border border-gold-100/50 rounded-2xl animate-pulse" />
                                 ))}
                             </div>
                         ) : categories.length === 0 ? (
-                            <div className="text-center py-16 flex flex-col items-center gap-4 border-2 border-dashed border-stone-200 rounded-3xl bg-white/40 p-8">
+                            <div className="text-center py-16 flex flex-col items-center gap-4 border-2 border-dashed border-gold-200/60 rounded-3xl bg-white/40 p-8">
                                 <div className="text-4xl">📁</div>
-                                <h3 className="font-serif text-stone-800 text-lg">No albums created yet</h3>
+                                <h3 className="font-serif text-taupe-800 text-lg">No albums created yet</h3>
                                 {isAdmin ? (
                                     <>
-                                        <p className="text-stone-400 font-light text-xs max-w-xs leading-relaxed">
+                                        <p className="text-taupe-400 font-light text-xs max-w-xs leading-relaxed">
                                             Create an album or drag & drop files/folders directly onto this page to start.
                                         </p>
                                         <button
                                             onClick={() => setShowCreateCategoryModal(true)}
-                                            className="mt-2 bg-stone-900 text-white text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-gold-600 transition duration-300 cursor-pointer"
+                                            className="mt-2 bg-taupe-800 text-white text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-gold-600 transition duration-300 cursor-pointer"
                                         >
                                             Create Your First Album
                                         </button>
                                     </>
                                 ) : (
-                                    <p className="text-stone-400 font-light text-xs max-w-xs leading-relaxed">
+                                    <p className="text-taupe-400 font-light text-xs max-w-xs leading-relaxed">
                                         Once albums are added by the admin, they will appear here.
                                     </p>
                                 )}
@@ -1137,9 +1137,9 @@ export default function Gallery() {
                                     <div
                                         key={cat.name}
                                         onClick={() => handleCategoryClick(cat.name)}
-                                        className="group flex flex-col gap-3 cursor-pointer bg-white/70 border border-stone-200/50 rounded-2xl p-4 shadow-sm hover:shadow-md hover:border-gold-300 transition-all duration-300 animate-fade-in-up"
+                                        className="group flex flex-col gap-3 cursor-pointer bg-white/70 border border-gold-200/60/50 rounded-2xl p-4 shadow-sm hover:shadow-md hover:border-gold-300 transition-all duration-300 animate-fade-in-up"
                                     >
-                                        <div className="aspect-[4/3] relative rounded-xl overflow-hidden bg-stone-100 border border-stone-100 shadow-inner">
+                                        <div className="aspect-[4/3] relative rounded-xl overflow-hidden bg-ivory-200 border border-gold-100 shadow-inner">
                                             {cat.thumbnail_url ? (
                                                 <img
                                                     src={`${API_BASE}${cat.thumbnail_url}`}
@@ -1148,16 +1148,16 @@ export default function Gallery() {
                                                     loading="lazy"
                                                 />
                                             ) : (
-                                                <div className="absolute inset-0 flex items-center justify-center text-3xl opacity-35 bg-stone-50">
+                                                <div className="absolute inset-0 flex items-center justify-center text-3xl opacity-35 bg-ivory-100">
                                                     📁
                                                 </div>
                                             )}
                                         </div>
                                         <div className="px-1">
-                                            <h3 className="font-semibold text-stone-800 text-sm truncate group-hover:text-gold-600 transition-colors">
+                                            <h3 className="font-semibold text-taupe-800 text-sm truncate group-hover:text-gold-600 transition-colors">
                                                 {cat.name}
                                             </h3>
-                                            <p className="text-[10px] text-stone-400 uppercase tracking-wider mt-0.5">
+                                            <p className="text-[10px] text-taupe-400 uppercase tracking-wider mt-0.5">
                                                 {cat.count} {cat.count === 1 ? 'Moments' : 'Moments'}
                                             </p>
                                         </div>
@@ -1173,12 +1173,12 @@ export default function Gallery() {
                     <>
                         {/* Standard Tabs Header / Action Bar */}
                         {!selectedCluster && !selectedCategory && (tab === 'all' || tab === 'mine' || tab === 'common') && (
-                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 mb-8 pb-6 border-b border-stone-200/50">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 mb-8 pb-6 border-b border-gold-200/60/50">
                                 <div>
-                                    <h2 className="font-serif text-stone-900 text-xl sm:text-2xl tracking-tight leading-none">
+                                    <h2 className="font-serif text-taupe-900 text-xl sm:text-2xl tracking-tight leading-none">
                                         {tab === 'all' ? 'All Moments' : tab === 'mine' ? 'Just Me' : 'Group Moments'}
                                     </h2>
-                                    <p className="text-stone-400 text-xs font-medium mt-1.5">
+                                    <p className="text-taupe-400 text-xs font-medium mt-1.5">
                                         {tab === 'all' && total > 0 ? `${total} moments available` : `${filtered.length} moments shown`}
                                     </p>
                                 </div>
@@ -1192,7 +1192,7 @@ export default function Gallery() {
                                                     setIsMultiSelectMode(false);
                                                     setSelectedPhotos([]);
                                                 }}
-                                                className="bg-white border border-stone-200 text-stone-600 text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-stone-50 cursor-pointer transition-all shadow-xs"
+                                                className="bg-white border border-gold-200/60 text-taupe-600 text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-ivory-100 cursor-pointer transition-all shadow-xs"
                                             >
                                                 Cancel Selection
                                             </button>
@@ -1200,7 +1200,7 @@ export default function Gallery() {
                                                 <>
                                                     <button
                                                         onClick={handleBatchDownload}
-                                                        className="bg-stone-900 text-white text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-gold-650 cursor-pointer transition-all flex items-center gap-1.5 shadow-sm"
+                                                        className="bg-taupe-800 text-white text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-gold-650 cursor-pointer transition-all flex items-center gap-1.5 shadow-sm"
                                                     >
                                                         ⬇️ Download ({selectedPhotos.length})
                                                     </button>
@@ -1218,7 +1218,7 @@ export default function Gallery() {
                                     ) : (
                                         <button
                                             onClick={() => setIsMultiSelectMode(true)}
-                                            className="bg-white border border-stone-200 text-stone-700 text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-stone-50 cursor-pointer transition-all flex items-center gap-1.5 shadow-xs"
+                                            className="bg-white border border-gold-200/60 text-taupe-700 text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-ivory-100 cursor-pointer transition-all flex items-center gap-1.5 shadow-xs"
                                         >
                                             ☑️ Select Photos
                                         </button>
@@ -1233,7 +1233,7 @@ export default function Gallery() {
                             const thumbnail = clusterObj?.thumbnail_url ? `${API_BASE}${clusterObj.thumbnail_url}?t=${clusterCacheBuster}` : null;
 
                             return (
-                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 mb-8 pb-6 border-b border-stone-200/50">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 mb-8 pb-6 border-b border-gold-200/60/50">
                                     <div className="flex items-center gap-4">
                                         <button
                                             onClick={() => {
@@ -1241,14 +1241,14 @@ export default function Gallery() {
                                                 setIsMultiSelectMode(false);
                                                 setSelectedPhotos([]);
                                             }}
-                                            className="bg-white border border-stone-200 text-stone-700 text-xs font-semibold px-3.5 py-2 rounded-xl hover:bg-stone-50 hover:border-stone-300 transition-all cursor-pointer shadow-xs"
+                                            className="bg-white border border-gold-200/60 text-taupe-700 text-xs font-semibold px-3.5 py-2 rounded-xl hover:bg-ivory-100 hover:border-gold-200 transition-all cursor-pointer shadow-xs"
                                         >
                                             ← Back
                                         </button>
                                         
                                         {/* Avatar with Change Photo option */}
                                         <div className="relative cursor-pointer w-20 h-20 sm:w-24 sm:h-24 flex-shrink-0">
-                                            <div className="w-full h-full rounded-full overflow-hidden border border-stone-200/50 shadow-md">
+                                            <div className="w-full h-full rounded-full overflow-hidden border border-gold-200/60/50 shadow-md">
                                                 {thumbnail ? (
                                                     <img 
                                                         src={thumbnail} 
@@ -1256,7 +1256,7 @@ export default function Gallery() {
                                                         className="w-full h-full object-cover"
                                                     />
                                                 ) : (
-                                                    <div className="w-full h-full bg-stone-100 flex items-center justify-center text-stone-400 text-2xl font-serif">
+                                                    <div className="w-full h-full bg-ivory-200 flex items-center justify-center text-taupe-400 text-2xl font-serif">
                                                         {name.charAt(0).toUpperCase()}
                                                     </div>
                                                 )}
@@ -1267,7 +1267,7 @@ export default function Gallery() {
                                                     e.stopPropagation();
                                                     setShowChangePhotoModal(true);
                                                 }}
-                                                className="absolute bottom-0 right-0 w-7 h-7 bg-white hover:bg-stone-50 border border-stone-200 rounded-full flex items-center justify-center shadow-md cursor-pointer hover:scale-105 transition-all text-xs z-10"
+                                                className="absolute bottom-0 right-0 w-7 h-7 bg-white hover:bg-ivory-100 border border-gold-200/60 rounded-full flex items-center justify-center shadow-md cursor-pointer hover:scale-105 transition-all text-xs z-10"
                                                 title="Change profile picture"
                                             >
                                                 📷
@@ -1288,26 +1288,26 @@ export default function Gallery() {
                                                         type="text"
                                                         value={newNameInput}
                                                         onChange={(e) => setNewNameInput(e.target.value)}
-                                                        className="font-serif text-stone-900 text-base sm:text-lg border border-stone-300 rounded-xl px-3 py-1.5 bg-white focus:outline-none focus:border-gold-500 shadow-sm"
+                                                        className="font-serif text-taupe-900 text-base sm:text-lg border border-gold-200 rounded-xl px-3 py-1.5 bg-white focus:outline-none focus:border-gold-500 shadow-sm"
                                                         autoFocus
                                                     />
                                                     <button 
                                                         type="submit"
-                                                        className="bg-stone-900 text-white text-xs font-semibold px-3 py-2 rounded-xl hover:bg-gold-600 transition-all cursor-pointer shadow-sm"
+                                                        className="bg-taupe-800 text-white text-xs font-semibold px-3 py-2 rounded-xl hover:bg-gold-600 transition-all cursor-pointer shadow-sm"
                                                     >
                                                         Save
                                                     </button>
                                                     <button 
                                                         type="button"
                                                         onClick={() => setIsEditingName(false)}
-                                                        className="bg-white border border-stone-200 text-stone-500 text-xs px-3 py-2 rounded-xl hover:bg-stone-50 cursor-pointer"
+                                                        className="bg-white border border-gold-200/60 text-taupe-500 text-xs px-3 py-2 rounded-xl hover:bg-ivory-100 cursor-pointer"
                                                     >
                                                         Cancel
                                                     </button>
                                                 </form>
                                             ) : (
                                                 <div className="flex items-center gap-2">
-                                                    <h2 className="font-serif text-stone-900 text-xl sm:text-2xl tracking-tight leading-none">
+                                                    <h2 className="font-serif text-taupe-900 text-xl sm:text-2xl tracking-tight leading-none">
                                                         {name}
                                                     </h2>
                                                     <button
@@ -1315,14 +1315,14 @@ export default function Gallery() {
                                                             setIsEditingName(true);
                                                             setNewNameInput(name);
                                                         }}
-                                                        className="text-stone-400 hover:text-gold-600 transition-colors text-xs cursor-pointer bg-transparent border-0 p-1 flex items-center justify-center"
+                                                        className="text-taupe-400 hover:text-gold-600 transition-colors text-xs cursor-pointer bg-transparent border-0 p-1 flex items-center justify-center"
                                                         title="Rename person"
                                                     >
                                                         ✏️
                                                     </button>
                                                 </div>
                                             )}
-                                            <p className="text-stone-400 text-xs font-medium">
+                                            <p className="text-taupe-400 text-xs font-medium">
                                                 {filtered.length} moments found
                                             </p>
                                         </div>
@@ -1338,7 +1338,7 @@ export default function Gallery() {
                                                         setIsMultiSelectMode(false);
                                                         setSelectedPhotos([]);
                                                     }}
-                                                    className="bg-white border border-stone-200 text-stone-600 text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-stone-50 cursor-pointer transition-all shadow-xs"
+                                                    className="bg-white border border-gold-200/60 text-taupe-600 text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-ivory-100 cursor-pointer transition-all shadow-xs"
                                                 >
                                                     Cancel Selection
                                                 </button>
@@ -1346,7 +1346,7 @@ export default function Gallery() {
                                                     <>
                                                         <button
                                                             onClick={handleBatchDownload}
-                                                            className="bg-stone-900 text-white text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-gold-650 cursor-pointer transition-all flex items-center gap-1.5 shadow-sm"
+                                                            className="bg-taupe-800 text-white text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-gold-650 cursor-pointer transition-all flex items-center gap-1.5 shadow-sm"
                                                         >
                                                             ⬇️ Download ({selectedPhotos.length})
                                                         </button>
@@ -1364,7 +1364,7 @@ export default function Gallery() {
                                         ) : (
                                             <button
                                                 onClick={() => setIsMultiSelectMode(true)}
-                                                className="bg-white border border-stone-200 text-stone-700 text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-stone-50 cursor-pointer transition-all flex items-center gap-1.5 shadow-xs"
+                                                className="bg-white border border-gold-200/60 text-taupe-700 text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-ivory-100 cursor-pointer transition-all flex items-center gap-1.5 shadow-xs"
                                             >
                                                 ☑️ Select Photos
                                             </button>
@@ -1380,7 +1380,7 @@ export default function Gallery() {
                                 onDragOver={(e) => e.preventDefault()}
                                 onDrop={(e) => handleDrop(e, selectedCategory)}
                             >
-                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 pb-4 border-b border-stone-200/50">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 pb-4 border-b border-gold-200/60/50">
                                     <div className="flex items-center gap-4">
                                         <button
                                             onClick={() => {
@@ -1388,15 +1388,15 @@ export default function Gallery() {
                                                 setIsMultiSelectMode(false);
                                                 setSelectedPhotos([]);
                                             }}
-                                            className="bg-white border border-stone-200 text-stone-700 text-xs font-semibold px-3.5 py-2 rounded-xl hover:bg-stone-50 hover:border-stone-300 transition-all cursor-pointer shadow-xs"
+                                            className="bg-white border border-gold-200/60 text-taupe-700 text-xs font-semibold px-3.5 py-2 rounded-xl hover:bg-ivory-100 hover:border-gold-200 transition-all cursor-pointer shadow-xs"
                                         >
                                             ← Back
                                         </button>
                                         <div>
-                                            <h2 className="font-serif text-stone-900 text-xl tracking-tight leading-none">
+                                            <h2 className="font-serif text-taupe-900 text-xl tracking-tight leading-none">
                                                 {selectedCategory}
                                             </h2>
-                                            <p className="text-stone-400 text-xs font-medium mt-1.5">
+                                            <p className="text-taupe-400 text-xs font-medium mt-1.5">
                                                 {filtered.length} moments found
                                             </p>
                                         </div>
@@ -1411,7 +1411,7 @@ export default function Gallery() {
                                                         setIsMultiSelectMode(false);
                                                         setSelectedPhotos([]);
                                                     }}
-                                                    className="bg-white border border-stone-200 text-stone-600 text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-stone-50 cursor-pointer transition-all shadow-xs"
+                                                    className="bg-white border border-gold-200/60 text-taupe-600 text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-ivory-100 cursor-pointer transition-all shadow-xs"
                                                 >
                                                     Cancel Selection
                                                 </button>
@@ -1419,7 +1419,7 @@ export default function Gallery() {
                                                     <>
                                                         <button
                                                             onClick={handleBatchDownload}
-                                                            className="bg-stone-900 text-white text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-gold-650 cursor-pointer transition-all flex items-center gap-1.5 shadow-sm"
+                                                            className="bg-taupe-800 text-white text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-gold-650 cursor-pointer transition-all flex items-center gap-1.5 shadow-sm"
                                                         >
                                                             ⬇️ Download ({selectedPhotos.length})
                                                         </button>
@@ -1437,7 +1437,7 @@ export default function Gallery() {
                                         ) : (
                                             <button
                                                 onClick={() => setIsMultiSelectMode(true)}
-                                                className="bg-white border border-stone-200 text-stone-700 text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-stone-50 cursor-pointer transition-all flex items-center gap-1.5 shadow-xs"
+                                                className="bg-white border border-gold-200/60 text-taupe-700 text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-ivory-100 cursor-pointer transition-all flex items-center gap-1.5 shadow-xs"
                                             >
                                                 ☑️ Select Photos
                                             </button>
@@ -1446,26 +1446,26 @@ export default function Gallery() {
                                 </div>
 
                                 {isAdmin && (
-                                    <div className="relative border-2 border-dashed border-stone-200 hover:border-gold-450 rounded-2xl p-6 text-center bg-white/40 cursor-pointer transition duration-300">
+                                    <div className="relative border-2 border-dashed border-gold-200/60 hover:border-gold-450 rounded-2xl p-6 text-center bg-white/40 cursor-pointer transition duration-300">
                                         <input
                                             type="file"
                                             multiple
                                             onChange={(e) => handleFileUpload(e.target.files, selectedCategory)}
                                             className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
                                         />
-                                        <div className="space-y-1.5 text-stone-500">
+                                        <div className="space-y-1.5 text-taupe-500">
                                             <p className="text-xs font-semibold">Drag & drop files/folders here or Click to select</p>
-                                            <p className="text-[9px] text-stone-400 uppercase tracking-wider">Supports photos & videos up to 100MB</p>
+                                            <p className="text-[9px] text-taupe-400 uppercase tracking-wider">Supports photos & videos up to 100MB</p>
                                         </div>
                                     </div>
                                 )}
 
                                 {uploadingFiles.length > 0 && (
-                                    <div className="bg-white border border-stone-200/80 rounded-2xl p-4 shadow-lg flex flex-col gap-2">
-                                        <h4 className="text-xs font-bold text-stone-500 uppercase tracking-wider">Uploading Files...</h4>
+                                    <div className="bg-white border border-gold-200/60/80 rounded-2xl p-4 shadow-lg flex flex-col gap-2">
+                                        <h4 className="text-xs font-bold text-taupe-500 uppercase tracking-wider">Uploading Files...</h4>
                                         <div className="max-h-32 overflow-y-auto space-y-1.5 font-mono text-[10px]">
                                             {uploadingFiles.map((file, idx) => (
-                                                <div key={idx} className="flex justify-between items-center text-stone-700">
+                                                <div key={idx} className="flex justify-between items-center text-taupe-700">
                                                     <span className="truncate max-w-[70%]">{file.name}</span>
                                                     <span className={`font-semibold uppercase tracking-wider ${
                                                         file.status === 'success' ? 'text-green-600' :
@@ -1484,8 +1484,8 @@ export default function Gallery() {
 
                         {/* Family Navigation Pill Bar */}
                         {familyMembers.length > 0 && tab === 'mine' && !selectedCluster && !selectedCategory && (
-                            <div className="mb-6 p-4 bg-white/40 backdrop-blur-md border border-stone-200/40 rounded-2xl shadow-sm">
-                                <h3 className="text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-3 px-1 flex items-center gap-1.5">
+                            <div className="mb-6 p-4 bg-white/40 backdrop-blur-md border border-gold-200/60/40 rounded-2xl shadow-sm">
+                                <h3 className="text-[10px] font-bold text-taupe-400 uppercase tracking-widest mb-3 px-1 flex items-center gap-1.5">
                                     <span>👨‍👩‍👧‍👦</span> Household Members
                                 </h3>
                                 <div className="flex gap-2.5 overflow-x-auto py-1 scrollbar-none snap-x snap-mandatory">
@@ -1494,8 +1494,8 @@ export default function Gallery() {
                                         onClick={() => setActiveFamilyMemberId(null)}
                                         className={`snap-start flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold tracking-wide transition-all duration-300 shadow-xs cursor-pointer ${
                                             activeFamilyMemberId === null
-                                                ? 'bg-stone-900 text-white shadow-md shadow-stone-900/10'
-                                                : 'bg-white/70 text-stone-600 hover:bg-white hover:text-stone-900 border border-stone-200/40'
+                                                ? 'bg-taupe-800 text-white shadow-md shadow-taupe-900/10'
+                                                : 'bg-white/70 text-taupe-600 hover:bg-white hover:text-taupe-900 border border-gold-200/60/40'
                                         }`}
                                     >
                                         <span className="text-sm">👨‍👩‍👧‍👦</span>
@@ -1512,10 +1512,10 @@ export default function Gallery() {
                                                 className={`snap-start flex items-center gap-2.5 px-3.5 py-2 rounded-xl text-xs font-semibold tracking-wide transition-all duration-300 shadow-xs cursor-pointer ${
                                                     isActive
                                                         ? 'bg-gold-500 text-white shadow-md shadow-gold-500/15'
-                                                        : 'bg-white/70 text-stone-600 hover:bg-white hover:text-stone-900 border border-stone-200/40'
+                                                        : 'bg-white/70 text-taupe-600 hover:bg-white hover:text-taupe-900 border border-gold-200/60/40'
                                                 }`}
                                             >
-                                                <div className="w-5 h-5 rounded-full overflow-hidden border border-stone-200 bg-stone-100 flex-shrink-0 flex items-center justify-center">
+                                                <div className="w-5 h-5 rounded-full overflow-hidden border border-gold-200/60 bg-ivory-200 flex-shrink-0 flex items-center justify-center">
                                                     <img
                                                         src={`${API_BASE}/faces/members/${member.id}/selfie`}
                                                         alt={member.name}
@@ -1536,14 +1536,14 @@ export default function Gallery() {
                         {(loadingClusterPhotos || loadingCategoryPhotos) ? (
                             <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
                                 {[...Array(6)].map((_, i) => (
-                                    <div key={i} className="aspect-square bg-stone-200/50 border border-stone-100/50 rounded-2xl animate-pulse" />
+                                    <div key={i} className="aspect-square bg-gold-100/50 border border-gold-100/50 rounded-2xl animate-pulse" />
                                 ))}
                             </div>
                         ) : loading && photos.length === 0 ? (
                             /* Elegant Shimmer Loading Grid */
                             <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
                                 {[...Array(9)].map((_, i) => (
-                                    <div key={i} className="aspect-square bg-stone-200/50 border border-stone-100/50 rounded-2xl animate-pulse" />
+                                    <div key={i} className="aspect-square bg-gold-100/50 border border-gold-100/50 rounded-2xl animate-pulse" />
                                 ))}
                             </div>
                         ) : (
@@ -1570,7 +1570,7 @@ export default function Gallery() {
 
                                 {/* Scroll to Load More Indicator */}
                                 {hasMore && !loading && (
-                                    <div className="flex justify-center items-center gap-1.5 mt-8 text-[10px] font-bold text-stone-400 uppercase tracking-widest animate-pulse">
+                                    <div className="flex justify-center items-center gap-1.5 mt-8 text-[10px] font-bold text-taupe-400 uppercase tracking-widest animate-pulse">
                                         <span>↓</span> Scroll for more photos
                                     </div>
                                 )}
@@ -1586,8 +1586,8 @@ export default function Gallery() {
                                 {filtered.length === 0 && !loading && (
                                     <div className="text-center py-20 flex flex-col items-center gap-4 animate-fade-in-up">
                                         <div className="text-4xl">🌾</div>
-                                        <h3 className="font-serif text-stone-800 text-lg">No moments found here</h3>
-                                        <p className="text-stone-400 font-light text-sm max-w-xs leading-relaxed">
+                                        <h3 className="font-serif text-taupe-800 text-lg">No moments found here</h3>
+                                        <p className="text-taupe-400 font-light text-sm max-w-xs leading-relaxed">
                                             {tab === 'mine' 
                                                 ? "We couldn't find any individual moments of you. Check Group Moments or scan again."
                                                 : tab === 'common' 
@@ -1598,7 +1598,7 @@ export default function Gallery() {
                                         {total === 0 && (
                                             <button
                                                 onClick={() => navigate('/register')}
-                                                className="mt-2 bg-stone-950 text-white text-xs font-semibold px-6 py-3 rounded-xl hover:bg-gold-600 transition duration-300 cursor-pointer"
+                                                className="mt-2 bg-taupe-900 text-white text-xs font-semibold px-6 py-3 rounded-xl hover:bg-gold-600 transition duration-300 cursor-pointer"
                                             >
                                                 Scan Your Selfie Again
                                             </button>
@@ -1615,7 +1615,7 @@ export default function Gallery() {
         {/* LIGHTBOX MODAL */}
         {activePhoto && (
                 <div 
-                    className="fixed inset-0 z-50 bg-stone-950/95 backdrop-blur-sm flex items-center justify-center p-4 md:p-10"
+                    className="fixed inset-0 z-50 bg-taupe-900/95 backdrop-blur-sm flex items-center justify-center p-4 md:p-10"
                     onClick={() => setLightboxIndex(null)}
                 >
                     {/* Close Button */}
@@ -1643,7 +1643,7 @@ export default function Gallery() {
                     >
                         {/* Elegant Loader inside Lightbox */}
                         {mediaLoading && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-stone-950/10 backdrop-blur-xs rounded-lg z-10 min-h-[300px]">
+                            <div className="absolute inset-0 flex items-center justify-center bg-taupe-900/10 backdrop-blur-xs rounded-lg z-10 min-h-[300px]">
                                 <div className="w-10 h-10 border-3 border-gold-300/20 border-t-gold-400 rounded-full animate-spin"></div>
                             </div>
                         )}
@@ -1681,7 +1681,7 @@ export default function Gallery() {
                                     <>
                                         <button 
                                             onClick={() => setShowShareDropdown(true)}
-                                            className="bg-stone-800 hover:bg-stone-750 text-white px-4 py-2.5 rounded-xl text-xs font-semibold transition-all duration-300 flex items-center gap-1.5 cursor-pointer shadow-lg border border-white/10"
+                                            className="bg-taupe-800 hover:bg-stone-750 text-white px-4 py-2.5 rounded-xl text-xs font-semibold transition-all duration-300 flex items-center gap-1.5 cursor-pointer shadow-lg border border-white/10"
                                         >
                                             👤 Share
                                         </button>
@@ -1696,14 +1696,14 @@ export default function Gallery() {
                                 {guestId && !activePhoto.is_common && (
                                     <button 
                                         onClick={() => handleNotMePhoto(activePhoto.drive_id)}
-                                        className="bg-stone-900/90 hover:bg-red-950/85 hover:text-red-200 text-stone-300 border border-stone-800 hover:border-red-900/60 px-4 py-2.5 rounded-xl text-xs font-semibold transition-all duration-300 flex items-center gap-1.5 cursor-pointer shadow-lg active:scale-95 group/notme"
+                                        className="bg-taupe-800/90 hover:bg-red-950/85 hover:text-red-200 text-taupe-300 border border-taupe-800 hover:border-red-900/60 px-4 py-2.5 rounded-xl text-xs font-semibold transition-all duration-300 flex items-center gap-1.5 cursor-pointer shadow-lg active:scale-95 group/notme"
                                     >
                                         <span className="transition-transform duration-200 group-hover/notme:scale-110">🙅‍♂️</span> Not Me
                                     </button>
                                 )}
                                 <button 
                                     onClick={() => downloadSinglePhoto(activePhoto)}
-                                    className="bg-white text-stone-950 px-4 py-2.5 rounded-xl text-xs font-semibold hover:bg-gold-500 hover:text-white transition-all duration-300 flex items-center gap-1.5 cursor-pointer shadow-lg"
+                                    className="bg-white text-taupe-900 px-4 py-2.5 rounded-xl text-xs font-semibold hover:bg-gold-500 hover:text-white transition-all duration-300 flex items-center gap-1.5 cursor-pointer shadow-lg"
                                     disabled={downloadingPhoto === activePhoto.drive_id}
                                 >
                                     {downloadingPhoto === activePhoto.drive_id ? (
@@ -1776,16 +1776,16 @@ export default function Gallery() {
 
             {/* CREATE ALBUM MODAL */}
             {showCreateCategoryModal && (
-                <div className="fixed inset-0 z-55 bg-stone-950/60 backdrop-blur-xs flex items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl border border-stone-200/80 animate-fade-in-up">
+                <div className="fixed inset-0 z-55 bg-taupe-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl border border-gold-200/60/80 animate-fade-in-up">
                         <div className="px-6 py-4 border-b border-stone-150 flex items-center justify-between">
                             <div>
-                                <h3 className="font-serif text-lg text-stone-900 leading-none mb-1">Create New Album</h3>
-                                <p className="text-stone-400 text-[11px] leading-tight">Organize special wedding moments into a custom collection.</p>
+                                <h3 className="font-serif text-lg text-taupe-900 leading-none mb-1">Create New Album</h3>
+                                <p className="text-taupe-400 text-[11px] leading-tight">Organize special wedding moments into a custom collection.</p>
                             </div>
                             <button
                                 onClick={() => setShowCreateCategoryModal(false)}
-                                className="text-stone-400 hover:text-stone-705 font-bold text-xl cursor-pointer"
+                                className="text-taupe-400 hover:text-stone-705 font-bold text-xl cursor-pointer"
                             >
                                 &times;
                             </button>
@@ -1793,13 +1793,13 @@ export default function Gallery() {
 
                         <form onSubmit={handleCreateCategorySubmit} className="p-6 space-y-4">
                             <div>
-                                <label className="block text-[10px] font-bold text-stone-500 uppercase tracking-widest mb-1.5">Album Name</label>
+                                <label className="block text-[10px] font-bold text-taupe-500 uppercase tracking-widest mb-1.5">Album Name</label>
                                 <input
                                     type="text"
                                     placeholder="e.g. Drone Shots, Venue Decor, Reception"
                                     value={newCategoryName}
                                     onChange={(e) => setNewCategoryName(e.target.value)}
-                                    className="w-full px-4 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:border-stone-400 text-stone-855 text-sm font-medium"
+                                    className="w-full px-4 py-2.5 rounded-xl border border-gold-200/60 focus:outline-none focus:border-taupe-400 text-stone-855 text-sm font-medium"
                                     required
                                     autoFocus
                                 />
@@ -1809,13 +1809,13 @@ export default function Gallery() {
                                 <button
                                     type="button"
                                     onClick={() => setShowCreateCategoryModal(false)}
-                                    className="flex-1 border border-stone-200 text-stone-600 font-semibold py-2.5 rounded-xl hover:bg-stone-50 transition cursor-pointer text-xs uppercase tracking-wider text-center"
+                                    className="flex-1 border border-gold-200/60 text-taupe-600 font-semibold py-2.5 rounded-xl hover:bg-ivory-100 transition cursor-pointer text-xs uppercase tracking-wider text-center"
                                 >
                                     Cancel
                                 </button>
                                 <button
                                     type="submit"
-                                    className="flex-2 bg-stone-900 text-white font-semibold py-2.5 rounded-xl hover:bg-stone-800 transition duration-300 cursor-pointer text-xs uppercase tracking-wider"
+                                    className="flex-2 bg-taupe-800 text-white font-semibold py-2.5 rounded-xl hover:bg-taupe-800 transition duration-300 cursor-pointer text-xs uppercase tracking-wider"
                                 >
                                     Create Album
                                 </button>
@@ -1828,7 +1828,7 @@ export default function Gallery() {
             {/* CHOOSE PROFILE PICTURE MODAL */}
             {showChangePhotoModal && (
                 <div 
-                    className="fixed inset-0 z-55 bg-stone-950/80 backdrop-blur-sm flex items-center justify-center p-4"
+                    className="fixed inset-0 z-55 bg-taupe-900/80 backdrop-blur-sm flex items-center justify-center p-4"
                     onClick={() => setShowChangePhotoModal(false)}
                 >
                     <div 
@@ -1836,13 +1836,13 @@ export default function Gallery() {
                         onClick={(e) => e.stopPropagation()}
                     >
                         {/* Header */}
-                        <div className="p-6 border-b border-stone-100 flex justify-between items-center bg-stone-50">
+                        <div className="p-6 border-b border-gold-100 flex justify-between items-center bg-ivory-100">
                             <div>
-                                <h3 className="font-serif text-stone-900 text-lg font-semibold">Choose Profile Picture</h3>
-                                <p className="text-stone-400 text-xs mt-0.5">Select a photo below or upload from your device.</p>
+                                <h3 className="font-serif text-taupe-900 text-lg font-semibold">Choose Profile Picture</h3>
+                                <p className="text-taupe-400 text-xs mt-0.5">Select a photo below or upload from your device.</p>
                             </div>
                             <div className="flex items-center gap-3">
-                                <label className="bg-stone-900 text-white hover:bg-gold-600 transition-all text-xs font-semibold px-4 py-2.5 rounded-xl cursor-pointer shadow-sm flex items-center gap-1.5">
+                                <label className="bg-taupe-800 text-white hover:bg-gold-600 transition-all text-xs font-semibold px-4 py-2.5 rounded-xl cursor-pointer shadow-sm flex items-center gap-1.5">
                                     📤 Upload Photo
                                     <input 
                                         type="file" 
@@ -1853,7 +1853,7 @@ export default function Gallery() {
                                 </label>
                                 <button 
                                     onClick={() => setShowChangePhotoModal(false)}
-                                    className="w-8 h-8 rounded-full bg-stone-200/60 text-stone-600 hover:bg-stone-200 flex items-center justify-center text-sm transition-all"
+                                    className="w-8 h-8 rounded-full bg-gold-100/60 text-taupe-600 hover:bg-gold-100 flex items-center justify-center text-sm transition-all"
                                 >
                                     ✕
                                 </button>
@@ -1864,14 +1864,14 @@ export default function Gallery() {
                         {/* Photo Grid */}
                         <div className="p-6 overflow-y-auto flex-1">
                             {filtered.length === 0 ? (
-                                <p className="text-stone-400 text-center text-sm py-12">No photos available.</p>
+                                <p className="text-taupe-400 text-center text-sm py-12">No photos available.</p>
                             ) : (
                                 <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
                                     {filtered.filter(p => !p.is_video).map((photo, i) => (
                                         <div 
                                             key={i}
                                             onClick={() => handleSetProfilePic(photo.drive_id)}
-                                            className="aspect-square relative group overflow-hidden bg-stone-100 border border-stone-200/50 rounded-xl cursor-pointer hover:border-gold-500 hover:shadow transition-all duration-300"
+                                            className="aspect-square relative group overflow-hidden bg-ivory-200 border border-gold-200/60/50 rounded-xl cursor-pointer hover:border-gold-500 hover:shadow transition-all duration-300"
                                         >
                                             <img 
                                                 src={`${API_BASE}${photo.thumb_url}`} 
@@ -1890,38 +1890,38 @@ export default function Gallery() {
 
             {/* SHARE WITH GUEST MODAL */}
             {showShareDropdown && activePhoto && (
-                <div className="fixed inset-0 z-55 bg-stone-950/65 backdrop-blur-xs flex items-center justify-center p-4" onClick={() => setShowShareDropdown(false)}>
+                <div className="fixed inset-0 z-55 bg-taupe-900/65 backdrop-blur-xs flex items-center justify-center p-4" onClick={() => setShowShareDropdown(false)}>
                     <div 
-                        className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl border border-stone-200/80 animate-fade-in-up flex flex-col max-h-[75vh]"
+                        className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl border border-gold-200/60/80 animate-fade-in-up flex flex-col max-h-[75vh]"
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div className="px-6 py-4 border-b border-stone-150 flex items-center justify-between">
                             <div>
-                                <h3 className="font-serif text-lg text-stone-900 leading-none mb-1">Share with Guest</h3>
-                                <p className="text-stone-400 text-[11px] leading-tight">Add this photo to a guest's personal album.</p>
+                                <h3 className="font-serif text-lg text-taupe-900 leading-none mb-1">Share with Guest</h3>
+                                <p className="text-taupe-400 text-[11px] leading-tight">Add this photo to a guest's personal album.</p>
                             </div>
                             <button
                                 onClick={() => setShowShareDropdown(false)}
-                                className="text-stone-400 hover:text-stone-705 font-bold text-xl cursor-pointer"
+                                className="text-taupe-400 hover:text-stone-705 font-bold text-xl cursor-pointer"
                             >
                                 &times;
                             </button>
                         </div>
 
-                        <div className="p-4 border-b border-stone-100 bg-stone-50/50">
+                        <div className="p-4 border-b border-gold-100 bg-ivory-100/50">
                             <input
                                 type="text"
                                 placeholder="🔍 Search guest by name..."
                                 value={shareSearchQuery}
                                 onChange={(e) => setShareSearchQuery(e.target.value)}
-                                className="w-full px-4 py-2 rounded-xl border border-stone-200 focus:outline-none focus:border-stone-400 text-stone-800 text-sm"
+                                className="w-full px-4 py-2 rounded-xl border border-gold-200/60 focus:outline-none focus:border-taupe-400 text-taupe-800 text-sm"
                                 autoFocus
                             />
                         </div>
 
                         <div className="flex-1 overflow-y-auto divide-y divide-stone-100 max-h-[45vh]">
                             {guestsList.filter(g => g.name.toLowerCase().includes(shareSearchQuery.toLowerCase())).length === 0 ? (
-                                <div className="p-6 text-center text-stone-400 text-sm font-light">
+                                <div className="p-6 text-center text-taupe-400 text-sm font-light">
                                     No guests found matching your search.
                                 </div>
                             ) : (
@@ -1931,10 +1931,10 @@ export default function Gallery() {
                                         <div
                                             key={guest.id}
                                             onClick={() => handleSharePhoto(activePhoto, guest.id)}
-                                            className="px-6 py-3.5 flex items-center justify-between hover:bg-stone-50 transition cursor-pointer"
+                                            className="px-6 py-3.5 flex items-center justify-between hover:bg-ivory-100 transition cursor-pointer"
                                         >
                                             <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 rounded-full bg-stone-100 border border-stone-200 flex items-center justify-center text-xs font-semibold text-stone-700 overflow-hidden">
+                                                <div className="w-8 h-8 rounded-full bg-ivory-200 border border-gold-200/60 flex items-center justify-center text-xs font-semibold text-taupe-700 overflow-hidden">
                                                     <img
                                                         src={`${API_BASE}/faces/guests/${guest.id}/selfie`}
                                                         alt=""
@@ -1943,11 +1943,11 @@ export default function Gallery() {
                                                     />
                                                 </div>
                                                 <div>
-                                                    <p className="text-sm font-semibold text-stone-800">{guest.name}</p>
-                                                    <p className="text-[10px] text-stone-400">{guest.phone || 'No phone number'}</p>
+                                                    <p className="text-sm font-semibold text-taupe-800">{guest.name}</p>
+                                                    <p className="text-[10px] text-taupe-400">{guest.phone || 'No phone number'}</p>
                                                 </div>
                                             </div>
-                                            <span className="text-[10px] bg-stone-100 text-stone-600 px-2.5 py-1 rounded-lg font-bold uppercase tracking-wider hover:bg-stone-200 transition-colors">
+                                            <span className="text-[10px] bg-ivory-200 text-taupe-600 px-2.5 py-1 rounded-lg font-bold uppercase tracking-wider hover:bg-gold-100 transition-colors">
                                                 Share
                                             </span>
                                         </div>
@@ -1963,7 +1963,7 @@ export default function Gallery() {
             {!isMultiSelectMode && (tab === 'all' || tab === 'mine' || tab === 'common' || selectedCluster || selectedCategory) && (
                 <button
                     onClick={() => setIsMultiSelectMode(true)}
-                    className="fixed bottom-6 right-6 bg-stone-900 text-white shadow-xl hover:shadow-2xl rounded-full w-14 h-14 flex items-center justify-center cursor-pointer transition-all duration-300 hover:scale-110 active:scale-95 group hover:bg-gold-550"
+                    className="fixed bottom-6 right-6 bg-taupe-800 text-white shadow-xl hover:shadow-2xl rounded-full w-14 h-14 flex items-center justify-center cursor-pointer transition-all duration-300 hover:scale-110 active:scale-95 group hover:bg-gold-550"
                     style={{ zIndex: 9999 }}
                     title="Select multiple photos"
                 >
@@ -1977,7 +1977,7 @@ export default function Gallery() {
                     className="fixed bottom-6 left-0 right-0 flex justify-center px-4" 
                     style={{ zIndex: 9999 }}
                 >
-                    <div className="bg-stone-900/95 backdrop-blur-md border border-white/10 px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-5 text-white animate-fade-in-up max-w-[95vw] sm:max-w-md">
+                    <div className="bg-taupe-800/95 backdrop-blur-md border border-white/10 px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-5 text-white animate-fade-in-up max-w-[95vw] sm:max-w-md">
                         <div className="flex flex-col">
                             <span className="text-[10px] font-bold text-gold-400 tracking-wider uppercase">Select Mode</span>
                             <span className="text-xs text-white/90 font-medium mt-0.5 whitespace-nowrap">{selectedPhotos.length} selected</span>
@@ -1997,7 +1997,7 @@ export default function Gallery() {
                                 <>
                                     <button
                                         onClick={handleBatchDownload}
-                                        className="bg-gold-500 hover:bg-gold-600 text-stone-950 text-xs font-bold px-3 py-2 rounded-xl transition-all flex items-center gap-1 cursor-pointer shadow-md whitespace-nowrap"
+                                        className="bg-gold-500 hover:bg-gold-600 text-taupe-900 text-xs font-bold px-3 py-2 rounded-xl transition-all flex items-center gap-1 cursor-pointer shadow-md whitespace-nowrap"
                                     >
                                         ⬇️ Download
                                     </button>

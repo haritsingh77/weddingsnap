@@ -37,7 +37,11 @@
   --color-sage-400: #93a687;
   --color-sage-600: #647256;
 
-  /* Taupe — warm ink, softer than near-black stone-900 */
+  /* Taupe — warm ink, softer than near-black stone-900 (full ramp) */
+  --color-taupe-300: #b8a892;
+  --color-taupe-400: #a3927a;
+  --color-taupe-500: #8a7860;
+  --color-taupe-600: #77654e;
   --color-taupe-700: #6b5a45;
   --color-taupe-800: #574734;
   --color-taupe-900: #3f3324;

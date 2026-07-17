@@ -317,11 +317,11 @@ export default function Admin() {
 
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-stone-50/70 flex items-center justify-center px-4">
-        <div className="bg-white p-8 rounded-2xl border border-stone-200/60 shadow-xl shadow-stone-100 max-w-md w-full">
+      <div className="min-h-screen bg-ivory-100/70 flex items-center justify-center px-4">
+        <div className="bg-white p-8 rounded-2xl border border-gold-200/60/60 shadow-xl shadow-gold-100 max-w-md w-full">
           <div className="text-center mb-6">
-            <h1 className="font-serif text-3xl text-stone-900 mb-2">WeddingSnap</h1>
-            <p className="text-stone-400 text-sm">Enter password to access Admin Control Panel</p>
+            <h1 className="font-serif text-3xl text-taupe-900 mb-2">WeddingSnap</h1>
+            <p className="text-taupe-400 text-sm">Enter password to access Admin Control Panel</p>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-4">
@@ -331,14 +331,14 @@ export default function Admin() {
                 placeholder="Admin Password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border border-stone-200 focus:outline-none focus:border-stone-400 text-stone-800"
+                className="w-full px-4 py-3 rounded-xl border border-gold-200/60 focus:outline-none focus:border-taupe-400 text-taupe-800"
                 required
               />
             </div>
             {loginError && <p className="text-red-500 text-xs">{loginError}</p>}
             <button
               type="submit"
-              className="w-full bg-stone-900 text-white font-semibold py-3 rounded-xl hover:bg-stone-800 transition duration-300 cursor-pointer"
+              className="w-full bg-taupe-800 text-white font-semibold py-3 rounded-xl hover:bg-taupe-800 transition duration-300 cursor-pointer"
             >
               Access Admin Panel
             </button>
@@ -349,24 +349,24 @@ export default function Admin() {
   }
 
   return (
-    <div className="min-h-screen bg-stone-50/70 pb-16">
+    <div className="min-h-screen bg-ivory-100/70 pb-16">
       {/* Header */}
-      <div className="bg-white border-b border-stone-200/50 px-6 py-6 sticky top-0 z-20 shadow-sm">
+      <div className="bg-white border-b border-gold-200/60/50 px-6 py-6 sticky top-0 z-20 shadow-sm">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
           <div>
-            <h1 className="font-serif text-stone-900 text-2xl tracking-tight leading-none mb-1.5">Admin Dashboard</h1>
-            <p className="text-stone-400 text-xs tracking-wide">WeddingSnap Guest Registry & Match Manager</p>
+            <h1 className="font-serif text-taupe-900 text-2xl tracking-tight leading-none mb-1.5">Admin Dashboard</h1>
+            <p className="text-taupe-400 text-xs tracking-wide">WeddingSnap Guest Registry & Match Manager</p>
           </div>
           <div className="flex gap-3">
             <button
               onClick={() => navigate('/gallery')}
-              className="bg-white border border-stone-200 text-stone-700 text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-stone-50 cursor-pointer"
+              className="bg-white border border-gold-200/60 text-taupe-700 text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-ivory-100 cursor-pointer"
             >
               🖼 View Gallery
             </button>
             <button
               onClick={handleLogout}
-              className="bg-stone-100 text-stone-600 text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-stone-200 cursor-pointer"
+              className="bg-ivory-200 text-taupe-600 text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-gold-100 cursor-pointer"
             >
               Sign Out
             </button>
@@ -378,34 +378,34 @@ export default function Admin() {
         
         {/* Left Side: Create / Register Guest Form */}
         <div className="lg:col-span-1 space-y-6">
-          <div className="bg-white p-6 rounded-2xl border border-stone-200/50 shadow-sm">
-            <h2 className="font-serif text-lg text-stone-800 mb-4 border-b border-stone-100 pb-2">Add New Guest</h2>
+          <div className="bg-white p-6 rounded-2xl border border-gold-200/60/50 shadow-sm">
+            <h2 className="font-serif text-lg text-taupe-800 mb-4 border-b border-gold-100 pb-2">Add New Guest</h2>
             <form onSubmit={handleCreateSubmit} className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-stone-500 uppercase tracking-wider mb-1.5">Guest Name</label>
+                <label className="block text-xs font-bold text-taupe-500 uppercase tracking-wider mb-1.5">Guest Name</label>
                 <input
                   type="text"
                   placeholder="e.g. Mark Robinson"
                   value={newGuestName}
                   onChange={(e) => setNewGuestName(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:border-stone-400 text-stone-800 text-sm"
+                  className="w-full px-4 py-2.5 rounded-xl border border-gold-200/60 focus:outline-none focus:border-taupe-400 text-taupe-800 text-sm"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-stone-500 uppercase tracking-wider mb-1.5">Phone Number (with country code)</label>
+                <label className="block text-xs font-bold text-taupe-500 uppercase tracking-wider mb-1.5">Phone Number (with country code)</label>
                 <input
                   type="text"
                   placeholder="e.g. +919876543210"
                   value={newGuestPhone}
                   onChange={(e) => setNewGuestPhone(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:border-stone-400 text-stone-800 text-sm"
+                  className="w-full px-4 py-2.5 rounded-xl border border-gold-200/60 focus:outline-none focus:border-taupe-400 text-taupe-800 text-sm"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-stone-500 uppercase tracking-wider mb-1.5">Reference Photo (Selfie)</label>
+                <label className="block text-xs font-bold text-taupe-500 uppercase tracking-wider mb-1.5">Reference Photo (Selfie)</label>
                 <input
                   type="file"
                   accept="image/*"
@@ -415,16 +415,16 @@ export default function Admin() {
                 />
                 <label
                   htmlFor="admin-selfie-upload"
-                  className="block w-full border-2 border-dashed border-stone-200 hover:border-stone-400 rounded-xl p-4 text-center cursor-pointer transition duration-300"
+                  className="block w-full border-2 border-dashed border-gold-200/60 hover:border-taupe-400 rounded-xl p-4 text-center cursor-pointer transition duration-300"
                 >
                   {selfiePreview ? (
                     <img
                       src={selfiePreview}
                       alt="Preview"
-                      className="w-24 h-24 object-cover mx-auto rounded-full border border-stone-200"
+                      className="w-24 h-24 object-cover mx-auto rounded-full border border-gold-200/60"
                     />
                   ) : (
-                    <div className="space-y-1 text-stone-400">
+                    <div className="space-y-1 text-taupe-400">
                       <p className="text-xs font-semibold">Click to select photo</p>
                       <p className="text-[10px]">JPG, PNG up to 10MB</p>
                     </div>
@@ -432,26 +432,26 @@ export default function Admin() {
                 </label>
               </div>
 
-              {createMessage && <p className="text-stone-600 text-xs font-semibold mt-2">{createMessage}</p>}
+              {createMessage && <p className="text-taupe-600 text-xs font-semibold mt-2">{createMessage}</p>}
 
               <button
                 type="submit"
                 disabled={creatingGuest}
-                className="w-full bg-stone-900 text-white font-semibold py-2.5 rounded-xl hover:bg-stone-800 transition duration-300 cursor-pointer disabled:bg-stone-300"
+                className="w-full bg-taupe-800 text-white font-semibold py-2.5 rounded-xl hover:bg-taupe-800 transition duration-300 cursor-pointer disabled:bg-gold-200"
               >
                 {creatingGuest ? 'Processing Matching...' : 'Register & Run Match'}
               </button>
             </form>
           </div>
 
-          <div className="bg-white p-6 rounded-2xl border border-stone-200/50 shadow-sm">
-            <h2 className="font-serif text-lg text-stone-800 mb-2">Matching Settings</h2>
-            <p className="text-stone-400 text-xs mb-4">Adjust the accuracy threshold. Higher numbers find more photos but may introduce wrong matches.</p>
+          <div className="bg-white p-6 rounded-2xl border border-gold-200/60/50 shadow-sm">
+            <h2 className="font-serif text-lg text-taupe-800 mb-2">Matching Settings</h2>
+            <p className="text-taupe-400 text-xs mb-4">Adjust the accuracy threshold. Higher numbers find more photos but may introduce wrong matches.</p>
             
-            <div className="mb-6 bg-stone-50/50 p-4 rounded-xl border border-stone-150/50">
-              <div className="flex justify-between text-xs font-bold text-stone-500 uppercase tracking-wider mb-1.5">
+            <div className="mb-6 bg-ivory-100/50 p-4 rounded-xl border border-stone-150/50">
+              <div className="flex justify-between text-xs font-bold text-taupe-500 uppercase tracking-wider mb-1.5">
                 <span>Distance Threshold</span>
-                <span className="font-mono text-stone-900 text-sm font-bold bg-white px-2 py-0.5 rounded border border-stone-200 shadow-sm">{tolerance}</span>
+                <span className="font-mono text-taupe-900 text-sm font-bold bg-white px-2 py-0.5 rounded border border-gold-200/60 shadow-sm">{tolerance}</span>
               </div>
               <input
                 type="range"
@@ -460,20 +460,20 @@ export default function Admin() {
                 step="0.01"
                 value={tolerance}
                 onChange={(e) => setTolerance(parseFloat(e.target.value))}
-                className="w-full h-1.5 bg-stone-200 rounded-lg appearance-none cursor-pointer accent-stone-850"
+                className="w-full h-1.5 bg-gold-100 rounded-lg appearance-none cursor-pointer accent-stone-850"
               />
-              <div className="flex justify-between text-[10px] text-stone-400 mt-1.5">
+              <div className="flex justify-between text-[10px] text-taupe-400 mt-1.5">
                 <span>Strict (0.40)</span>
                 <span>Balanced (0.55 - 0.60)</span>
                 <span>Relaxed (0.65)</span>
               </div>
             </div>
 
-            <h3 className="font-serif text-sm text-stone-800 mb-1 border-t border-stone-100 pt-3">Global Operations</h3>
-            <p className="text-stone-400 text-[10px] mb-3">Re-run the matching algorithm for all registered guests concurrently.</p>
+            <h3 className="font-serif text-sm text-taupe-800 mb-1 border-t border-gold-100 pt-3">Global Operations</h3>
+            <p className="text-taupe-400 text-[10px] mb-3">Re-run the matching algorithm for all registered guests concurrently.</p>
             
             {batchResult && (
-              <div className="bg-stone-50 border border-stone-150 rounded-xl p-3 mb-4 text-stone-600 text-xs font-mono whitespace-pre-line leading-relaxed">
+              <div className="bg-ivory-100 border border-stone-150 rounded-xl p-3 mb-4 text-taupe-600 text-xs font-mono whitespace-pre-line leading-relaxed">
                 {batchResult}
               </div>
             )}
@@ -481,7 +481,7 @@ export default function Admin() {
             <button
               onClick={handleRunBatchMatching}
               disabled={batchMatching}
-              className="w-full bg-stone-150 hover:bg-stone-200 text-stone-800 font-semibold py-2.5 rounded-xl transition duration-300 cursor-pointer disabled:bg-stone-50 disabled:text-stone-300"
+              className="w-full bg-stone-150 hover:bg-gold-100 text-taupe-800 font-semibold py-2.5 rounded-xl transition duration-300 cursor-pointer disabled:bg-ivory-100 disabled:text-taupe-300"
             >
               {batchMatching ? 'Processing Catalog...' : '🔁 Match All Guests'}
             </button>
@@ -490,26 +490,26 @@ export default function Admin() {
 
         {/* Right Side: Guest Registry List */}
         <div className="lg:col-span-2 space-y-6">
-          <div className="bg-white rounded-2xl border border-stone-200/50 shadow-sm overflow-hidden">
-            <div className="px-6 py-4 border-b border-stone-100 flex items-center justify-between">
-              <h2 className="font-serif text-lg text-stone-800">Guest Directory</h2>
+          <div className="bg-white rounded-2xl border border-gold-200/60/50 shadow-sm overflow-hidden">
+            <div className="px-6 py-4 border-b border-gold-100 flex items-center justify-between">
+              <h2 className="font-serif text-lg text-taupe-800">Guest Directory</h2>
               <button
                 onClick={fetchGuestsList}
-                className="text-stone-400 hover:text-stone-700 text-xs font-semibold cursor-pointer"
+                className="text-taupe-400 hover:text-taupe-700 text-xs font-semibold cursor-pointer"
               >
                 🔄 Refresh List
               </button>
             </div>
 
             {loadingGuests ? (
-              <div className="p-8 text-center text-stone-400 text-sm">Loading guest profiles...</div>
+              <div className="p-8 text-center text-taupe-400 text-sm">Loading guest profiles...</div>
             ) : guests.length === 0 ? (
-              <div className="p-8 text-center text-stone-400 text-sm">No guests registered in system yet. Use form on the left to add guests.</div>
+              <div className="p-8 text-center text-taupe-400 text-sm">No guests registered in system yet. Use form on the left to add guests.</div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full border-collapse">
                   <thead>
-                    <tr className="bg-stone-50 border-b border-stone-100 text-[10px] text-stone-400 uppercase tracking-wider font-bold">
+                    <tr className="bg-ivory-100 border-b border-gold-100 text-[10px] text-taupe-400 uppercase tracking-wider font-bold">
                       <th className="px-6 py-3 text-left">Photo</th>
                       <th className="px-6 py-3 text-left">Name</th>
                       <th className="px-6 py-3 text-left">Phone</th>
@@ -519,50 +519,50 @@ export default function Admin() {
                   </thead>
                   <tbody className="divide-y divide-stone-100">
                     {guests.map(guest => (
-                      <tr key={guest.id} className="hover:bg-stone-50/50 transition-colors">
+                      <tr key={guest.id} className="hover:bg-ivory-100/50 transition-colors">
                         <td className="px-6 py-4">
                           <img
                             src={`${API_BASE}/admin/guests/${guest.id}/selfie?password=${localStorage.getItem('admin_password')}`}
                             alt="Selfie"
-                            className="w-10 h-10 rounded-full object-cover border border-stone-200/70"
+                            className="w-10 h-10 rounded-full object-cover border border-gold-200/60/70"
                             onError={(e) => {
                               // If selfie missing, show generic user icon
                               e.target.src = '/logo.png'
                             }}
                           />
                         </td>
-                        <td className="px-6 py-4 text-stone-800 text-sm font-semibold">{guest.name}</td>
-                        <td className="px-6 py-4 text-stone-400 text-xs">{guest.phone || '—'}</td>
+                        <td className="px-6 py-4 text-taupe-800 text-sm font-semibold">{guest.name}</td>
+                        <td className="px-6 py-4 text-taupe-400 text-xs">{guest.phone || '—'}</td>
                         <td className="px-6 py-4 text-center">
-                          <span className="bg-stone-100 text-stone-700 text-xs px-2.5 py-1 rounded-full font-bold">
+                          <span className="bg-ivory-200 text-taupe-700 text-xs px-2.5 py-1 rounded-full font-bold">
                             {guest.photo_count}
                           </span>
                         </td>
                         <td className="px-6 py-4 text-right space-x-2">
                           <button
                             onClick={() => handleOpenFamily(guest)}
-                            className="text-stone-700 hover:text-stone-900 text-xs font-semibold bg-stone-100 hover:bg-stone-200 px-3 py-1.5 rounded-lg cursor-pointer"
+                            className="text-taupe-700 hover:text-taupe-900 text-xs font-semibold bg-ivory-200 hover:bg-gold-100 px-3 py-1.5 rounded-lg cursor-pointer"
                             title="Manage Family Members"
                           >
                             👨‍👩‍👧‍👦 Family
                           </button>
                           <button
                             onClick={() => handleOpenReview(guest)}
-                            className="text-stone-700 hover:text-stone-900 text-xs font-semibold bg-stone-100 hover:bg-stone-200 px-3 py-1.5 rounded-lg cursor-pointer"
+                            className="text-taupe-700 hover:text-taupe-900 text-xs font-semibold bg-ivory-200 hover:bg-gold-100 px-3 py-1.5 rounded-lg cursor-pointer"
                             title="Review & Remove wrong matches"
                           >
                             👁 Review
                           </button>
                           <button
                             onClick={() => handleOpenEdit(guest)}
-                            className="text-stone-700 hover:text-stone-900 text-xs font-semibold bg-stone-100 hover:bg-stone-200 px-3 py-1.5 rounded-lg cursor-pointer"
+                            className="text-taupe-700 hover:text-taupe-900 text-xs font-semibold bg-ivory-200 hover:bg-gold-100 px-3 py-1.5 rounded-lg cursor-pointer"
                             title="Edit guest profile and face photo"
                           >
                             ✏️ Edit
                           </button>
                           <button
                             onClick={() => handleRunMatching(guest.id)}
-                            className="text-stone-400 hover:text-stone-700 text-xs p-1"
+                            className="text-taupe-400 hover:text-taupe-700 text-xs p-1"
                             title="Re-run Face Match"
                           >
                             🔁
@@ -600,15 +600,15 @@ export default function Admin() {
       {/* Review Album Modal Overlay */}
       {selectedGuest && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl border border-stone-200">
-            <div className="px-6 py-4 border-b border-stone-100 flex items-center justify-between">
+          <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl border border-gold-200/60">
+            <div className="px-6 py-4 border-b border-gold-100 flex items-center justify-between">
               <div>
-                <h3 className="font-serif text-lg text-stone-900 leading-none mb-1">Album Review: {selectedGuest.name}</h3>
-                <p className="text-stone-400 text-xs">Verify matched photos and remove any incorrect ones.</p>
+                <h3 className="font-serif text-lg text-taupe-900 leading-none mb-1">Album Review: {selectedGuest.name}</h3>
+                <p className="text-taupe-400 text-xs">Verify matched photos and remove any incorrect ones.</p>
               </div>
               <button
                 onClick={() => setSelectedGuest(null)}
-                className="text-stone-400 hover:text-stone-700 font-bold text-xl cursor-pointer"
+                className="text-taupe-400 hover:text-taupe-700 font-bold text-xl cursor-pointer"
               >
                 &times;
               </button>
@@ -616,15 +616,15 @@ export default function Admin() {
 
             <div className="flex-1 overflow-y-auto p-6">
               {loadingPhotos ? (
-                <div className="p-12 text-center text-stone-400 text-sm">Loading matched album...</div>
+                <div className="p-12 text-center text-taupe-400 text-sm">Loading matched album...</div>
               ) : reviewPhotos.length === 0 ? (
-                <div className="p-12 text-center text-stone-400 text-sm">No personal matched photos found for this guest.</div>
+                <div className="p-12 text-center text-taupe-400 text-sm">No personal matched photos found for this guest.</div>
               ) : (
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   {reviewPhotos.map((photo, index) => (
                     <div
                       key={photo.id}
-                      className="group relative aspect-square rounded-xl overflow-hidden bg-stone-100 border border-stone-200/50 cursor-pointer"
+                      className="group relative aspect-square rounded-xl overflow-hidden bg-ivory-200 border border-gold-200/60/50 cursor-pointer"
                       onClick={() => setLightboxIndex(index)}
                     >
                       {photo.is_video ? (
@@ -677,7 +677,7 @@ export default function Admin() {
         >
           <button
             onClick={() => setLightboxIndex(null)}
-            className="absolute top-6 right-6 text-white text-3xl font-bold cursor-pointer hover:text-stone-300"
+            className="absolute top-6 right-6 text-white text-3xl font-bold cursor-pointer hover:text-taupe-300"
           >
             &times;
           </button>
@@ -707,15 +707,15 @@ export default function Admin() {
       {/* Edit Guest Modal Overlay */}
       {editingGuest && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl border border-stone-200 animate-fade-in-up">
-            <div className="px-6 py-4 border-b border-stone-100 flex items-center justify-between">
+          <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl border border-gold-200/60 animate-fade-in-up">
+            <div className="px-6 py-4 border-b border-gold-100 flex items-center justify-between">
               <div>
-                <h3 className="font-serif text-lg text-stone-900 leading-none mb-1">Edit Guest Profile</h3>
-                <p className="text-stone-400 text-xs">Modify registry details or face reference photo.</p>
+                <h3 className="font-serif text-lg text-taupe-900 leading-none mb-1">Edit Guest Profile</h3>
+                <p className="text-taupe-400 text-xs">Modify registry details or face reference photo.</p>
               </div>
               <button
                 onClick={() => setEditingGuest(null)}
-                className="text-stone-400 hover:text-stone-705 font-bold text-xl cursor-pointer"
+                className="text-taupe-400 hover:text-stone-705 font-bold text-xl cursor-pointer"
               >
                 &times;
               </button>
@@ -723,28 +723,28 @@ export default function Admin() {
 
             <form onSubmit={handleEditSubmit} className="p-6 space-y-4">
               <div>
-                <label className="block text-xs font-bold text-stone-500 uppercase tracking-wider mb-1.5">Guest Name</label>
+                <label className="block text-xs font-bold text-taupe-500 uppercase tracking-wider mb-1.5">Guest Name</label>
                 <input
                   type="text"
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:border-stone-400 text-stone-850 text-sm font-medium"
+                  className="w-full px-4 py-2.5 rounded-xl border border-gold-200/60 focus:outline-none focus:border-taupe-400 text-stone-850 text-sm font-medium"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-stone-500 uppercase tracking-wider mb-1.5">Phone Number</label>
+                <label className="block text-xs font-bold text-taupe-500 uppercase tracking-wider mb-1.5">Phone Number</label>
                 <input
                   type="text"
                   value={editPhone}
                   onChange={(e) => setEditPhone(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:border-stone-400 text-stone-850 text-sm font-medium"
+                  className="w-full px-4 py-2.5 rounded-xl border border-gold-200/60 focus:outline-none focus:border-taupe-400 text-stone-850 text-sm font-medium"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-stone-500 uppercase tracking-wider mb-1.5">Replace Face Photo (Selfie)</label>
+                <label className="block text-xs font-bold text-taupe-500 uppercase tracking-wider mb-1.5">Replace Face Photo (Selfie)</label>
                 <input
                   type="file"
                   accept="image/*"
@@ -760,30 +760,30 @@ export default function Admin() {
                 />
                 <label
                   htmlFor="edit-selfie-upload"
-                  className="block w-full border-2 border-dashed border-stone-200 hover:border-stone-400 rounded-xl p-4 text-center cursor-pointer transition duration-300"
+                  className="block w-full border-2 border-dashed border-gold-200/60 hover:border-taupe-400 rounded-xl p-4 text-center cursor-pointer transition duration-300"
                 >
                   {editSelfiePreview ? (
                     <img
                       src={editSelfiePreview}
                       alt="New Preview"
-                      className="w-20 h-20 object-cover mx-auto rounded-full border border-stone-200"
+                      className="w-20 h-20 object-cover mx-auto rounded-full border border-gold-200/60"
                     />
                   ) : (
                     <div className="space-y-1.5">
                       <img
                         src={`${API_BASE}/admin/guests/${editingGuest.id}/selfie?password=${localStorage.getItem('admin_password')}`}
                         alt="Current Selfie"
-                        className="w-20 h-20 object-cover mx-auto rounded-full border border-stone-200"
+                        className="w-20 h-20 object-cover mx-auto rounded-full border border-gold-200/60"
                         onError={(e) => { e.target.src = '/logo.png' }}
                       />
-                      <p className="text-[10px] text-stone-400 font-semibold uppercase tracking-wider">Click to upload new photo</p>
+                      <p className="text-[10px] text-taupe-400 font-semibold uppercase tracking-wider">Click to upload new photo</p>
                     </div>
                   )}
                 </label>
               </div>
 
               {editMessage && (
-                <p className="text-stone-600 text-xs font-semibold text-center mt-2">
+                <p className="text-taupe-600 text-xs font-semibold text-center mt-2">
                   {editMessage}
                 </p>
               )}
@@ -792,14 +792,14 @@ export default function Admin() {
                 <button
                   type="button"
                   onClick={() => setEditingGuest(null)}
-                  className="flex-1 border border-stone-200 text-stone-600 font-semibold py-2.5 rounded-xl hover:bg-stone-50 transition cursor-pointer text-xs uppercase tracking-wider text-center"
+                  className="flex-1 border border-gold-200/60 text-taupe-600 font-semibold py-2.5 rounded-xl hover:bg-ivory-100 transition cursor-pointer text-xs uppercase tracking-wider text-center"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={updatingGuest}
-                  className="flex-2 bg-stone-900 text-white font-semibold py-2.5 rounded-xl hover:bg-stone-800 transition duration-300 cursor-pointer disabled:bg-stone-300 text-xs uppercase tracking-wider"
+                  className="flex-2 bg-taupe-800 text-white font-semibold py-2.5 rounded-xl hover:bg-taupe-800 transition duration-300 cursor-pointer disabled:bg-gold-200 text-xs uppercase tracking-wider"
                 >
                   {updatingGuest ? 'Saving Details...' : 'Save Changes'}
                 </button>
@@ -812,15 +812,15 @@ export default function Admin() {
       {/* Manage Family Modal Overlay */}
       {selectedFamilyGuest && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl border border-stone-200 animate-fade-in-up">
-            <div className="px-6 py-4 border-b border-stone-100 flex items-center justify-between">
+          <div className="bg-white rounded-3xl max-w-md w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl border border-gold-200/60 animate-fade-in-up">
+            <div className="px-6 py-4 border-b border-gold-100 flex items-center justify-between">
               <div>
-                <h3 className="font-serif text-lg text-stone-900 leading-none mb-1">Manage Household</h3>
-                <p className="text-stone-400 text-xs">Family card: <span className="font-semibold text-stone-750">{selectedFamilyGuest.name}</span></p>
+                <h3 className="font-serif text-lg text-taupe-900 leading-none mb-1">Manage Household</h3>
+                <p className="text-taupe-400 text-xs">Family card: <span className="font-semibold text-stone-750">{selectedFamilyGuest.name}</span></p>
               </div>
               <button
                 onClick={() => setSelectedFamilyGuest(null)}
-                className="text-stone-400 hover:text-stone-700 font-bold text-xl cursor-pointer"
+                className="text-taupe-400 hover:text-taupe-700 font-bold text-xl cursor-pointer"
               >
                 &times;
               </button>
@@ -829,22 +829,22 @@ export default function Admin() {
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
               {/* Existing Family Members List */}
               <div>
-                <h4 className="text-xs font-bold text-stone-500 uppercase tracking-wider mb-3">Family Members</h4>
+                <h4 className="text-xs font-bold text-taupe-500 uppercase tracking-wider mb-3">Family Members</h4>
                 {loadingFamily ? (
-                  <div className="text-center py-4 text-stone-400 text-xs">Loading family list...</div>
+                  <div className="text-center py-4 text-taupe-400 text-xs">Loading family list...</div>
                 ) : familyMembers.length === 0 ? (
-                  <div className="text-center py-5 text-stone-400 text-xs bg-stone-50/55 rounded-2xl border border-dashed border-stone-200 p-4">
+                  <div className="text-center py-5 text-taupe-400 text-xs bg-ivory-100/55 rounded-2xl border border-dashed border-gold-200/60 p-4">
                     No other family members registered yet. Add one below!
                   </div>
                 ) : (
                   <div className="space-y-2.5">
                     {familyMembers.map(member => (
-                      <div key={member.id} className="flex items-center justify-between p-3 bg-stone-50/50 rounded-2xl border border-stone-150/40 hover:bg-stone-100/50 transition duration-200">
+                      <div key={member.id} className="flex items-center justify-between p-3 bg-ivory-100/50 rounded-2xl border border-stone-150/40 hover:bg-ivory-200/50 transition duration-200">
                         <div className="flex items-center gap-3">
                           <img
                             src={`${API_BASE}/admin/members/${member.id}/selfie?password=${localStorage.getItem('admin_password')}`}
                             alt={member.name}
-                            className="w-10 h-10 rounded-full object-cover border border-stone-200/80 bg-white"
+                            className="w-10 h-10 rounded-full object-cover border border-gold-200/60/80 bg-white"
                             onError={(e) => { e.target.src = '/logo.png' }}
                           />
                           <span className="text-sm font-semibold text-stone-850">{member.name}</span>
@@ -863,23 +863,23 @@ export default function Admin() {
               </div>
 
               {/* Add Family Member Form */}
-              <div className="border-t border-stone-100 pt-4">
-                <h4 className="text-xs font-bold text-stone-500 uppercase tracking-wider mb-3">Add Family Member</h4>
-                <form onSubmit={handleAddFamilyMemberSubmit} className="space-y-4 bg-stone-50/30 p-4 rounded-2xl border border-stone-150/55">
+              <div className="border-t border-gold-100 pt-4">
+                <h4 className="text-xs font-bold text-taupe-500 uppercase tracking-wider mb-3">Add Family Member</h4>
+                <form onSubmit={handleAddFamilyMemberSubmit} className="space-y-4 bg-ivory-100/30 p-4 rounded-2xl border border-stone-150/55">
                   <div>
-                    <label className="block text-[10px] font-bold text-stone-400 uppercase tracking-wider mb-1">Member Name</label>
+                    <label className="block text-[10px] font-bold text-taupe-400 uppercase tracking-wider mb-1">Member Name</label>
                     <input
                       type="text"
                       placeholder="e.g. Susan Miller"
                       value={newMemberName}
                       onChange={(e) => setNewMemberName(e.target.value)}
-                      className="w-full px-4 py-2.5 rounded-xl border border-stone-200 focus:outline-none focus:border-stone-400 text-stone-800 text-xs font-medium"
+                      className="w-full px-4 py-2.5 rounded-xl border border-gold-200/60 focus:outline-none focus:border-taupe-400 text-taupe-800 text-xs font-medium"
                       required
                     />
                   </div>
 
                   <div>
-                    <label className="block text-[10px] font-bold text-stone-400 uppercase tracking-wider mb-1">Reference Portrait (Selfie)</label>
+                    <label className="block text-[10px] font-bold text-taupe-400 uppercase tracking-wider mb-1">Reference Portrait (Selfie)</label>
                     <input
                       type="file"
                       accept="image/*"
@@ -895,25 +895,25 @@ export default function Admin() {
                     />
                     <label
                       htmlFor="member-selfie-upload"
-                      className="block w-full border border-dashed border-stone-200 hover:border-stone-400 rounded-xl p-4 text-center cursor-pointer transition bg-white"
+                      className="block w-full border border-dashed border-gold-200/60 hover:border-taupe-400 rounded-xl p-4 text-center cursor-pointer transition bg-white"
                     >
                       {memberSelfiePreview ? (
                         <img
                           src={memberSelfiePreview}
                           alt="Preview"
-                          className="w-14 h-14 object-cover mx-auto rounded-full border border-stone-200"
+                          className="w-14 h-14 object-cover mx-auto rounded-full border border-gold-200/60"
                         />
                       ) : (
                         <div className="text-stone-450 space-y-0.5 py-1">
-                          <p className="text-[10px] font-semibold text-stone-600">Select Portrait Photo</p>
-                          <p className="text-[8px] text-stone-400">Clear close-up portrait for maximum accuracy</p>
+                          <p className="text-[10px] font-semibold text-taupe-600">Select Portrait Photo</p>
+                          <p className="text-[8px] text-taupe-400">Clear close-up portrait for maximum accuracy</p>
                         </div>
                       )}
                     </label>
                   </div>
 
                   {familyMessage && (
-                    <p className="text-stone-600 text-xs font-semibold text-center mt-1">
+                    <p className="text-taupe-600 text-xs font-semibold text-center mt-1">
                       {familyMessage}
                     </p>
                   )}
@@ -921,7 +921,7 @@ export default function Admin() {
                   <button
                     type="submit"
                     disabled={addingMember}
-                    className="w-full bg-stone-900 hover:bg-stone-800 text-white font-semibold py-2.5 rounded-xl transition duration-200 text-xs uppercase tracking-wider disabled:bg-stone-300 cursor-pointer"
+                    className="w-full bg-taupe-800 hover:bg-taupe-800 text-white font-semibold py-2.5 rounded-xl transition duration-200 text-xs uppercase tracking-wider disabled:bg-gold-200 cursor-pointer"
                   >
                     {addingMember ? 'Matching & Syncing...' : 'Add Family Member'}
                   </button>
