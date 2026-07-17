@@ -1,26 +1,47 @@
 """
 ZIP generation and download routes.
+
+ZIPs are built on disk (LOCAL_CACHE_DIR/zips), not in RAM: the old in-memory
+_zip_store held every ZIP forever (OOM risk at GB scale) and evaporated on
+restart while download_sessions still said 'ready'. Disk files survive process
+restarts, are streamed via FileResponse without loading into memory, and are
+pruned after ZIP_TTL_HOURS.
 """
 
-import io
 import logging
+import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse
 
 from app.database import supabase
 from app.services.drive_service import download_file_to_memory
+from app.services.drive_cache import LOCAL_CACHE_DIR
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/download", tags=["download"])
 
-# In-memory ZIP store keyed by session_id.
-# Avoids rebuilding the ZIP on stream after background task finishes.
-_zip_store: dict[str, bytes] = {}
+ZIP_DIR = LOCAL_CACHE_DIR / "zips"
+ZIP_DIR.mkdir(parents=True, exist_ok=True)
+ZIP_TTL_HOURS = 24
+
+
+def _zip_path(session_id: str) -> Path:
+    return ZIP_DIR / f"{session_id}.zip"
+
+
+def _prune_old_zips() -> None:
+    cutoff = time.time() - ZIP_TTL_HOURS * 3600
+    for f in ZIP_DIR.glob("*.zip"):
+        try:
+            if f.stat().st_mtime < cutoff:
+                f.unlink()
+        except Exception:
+            pass
 
 # Extension → correct file extension for download filename
 _MIME_EXT = {
@@ -52,63 +73,83 @@ def _download_one(drive_id: str, is_common: bool, index: int):
     return filename, data
 
 
+def _collect_rows(guest_id: str) -> list[tuple]:
+    """(drive_id, is_common, index) for every photo in the guest's download."""
+    gp_res = supabase.table("guest_photos").select("photo_id").eq("guest_id", guest_id).execute()
+    personal_ids = [str(row["photo_id"]) for row in gp_res.data] if (gp_res.data and len(gp_res.data) > 0) else []
+
+    if personal_ids:
+        or_filter = f"is_common.eq.true,id.in.({','.join(personal_ids)})"
+        result = supabase.table("photos").select("drive_path, is_common").or_(or_filter).execute()
+    else:
+        result = supabase.table("photos").select("drive_path, is_common").eq("is_common", True).execute()
+
+    return [
+        (row["drive_path"], row.get("is_common", False), i)
+        for i, row in enumerate(result.data)
+        if row.get("drive_path")
+    ]
+
+
+def _build_zip_file(guest_id: str, session_id: str) -> tuple[Path, int]:
+    """
+    Download all guest photos in parallel and zip them straight to disk.
+    Writes to a .part file, then renames — a crash never leaves a ZIP that
+    looks complete. Returns (path, file_count). Blocking: call from a
+    background task or a threadpool, never the event loop.
+    """
+    rows = _collect_rows(guest_id)
+    total = len(rows)
+    log.info(f"ZIP: starting parallel download of {total} files for guest {guest_id}")
+
+    final_path = _zip_path(session_id)
+    part_path = final_path.parent / (final_path.name + ".part")
+    success_count = 0
+
+    try:
+        with open(part_path, "wb") as fh:
+            with zipfile.ZipFile(fh, "w", zipfile.ZIP_DEFLATED) as zf:
+                with ThreadPoolExecutor(max_workers=8) as executor:
+                    futures = {
+                        executor.submit(_download_one, drive_id, is_common, idx): idx
+                        for drive_id, is_common, idx in rows
+                    }
+                    for future in as_completed(futures):
+                        result_item = future.result()
+                        if result_item:
+                            filename, data = result_item
+                            zf.writestr(filename, data)
+                            success_count += 1
+                            if success_count % 50 == 0:
+                                log.info(f"ZIP progress: {success_count}/{total} files")
+        part_path.rename(final_path)
+    except Exception:
+        part_path.unlink(missing_ok=True)
+        raise
+
+    log.info(
+        f"ZIP ready for guest {guest_id}: {success_count} files, "
+        f"{final_path.stat().st_size:,} bytes on disk"
+    )
+    return final_path, success_count
+
+
 def build_zip(guest_id: str, session_id: str):
-    """Background task — downloads all guest photos in parallel and zips them.
-    Must be regular def (not async) so FastAPI runs it in a thread pool
-    and does NOT block the main event loop with Drive I/O."""
+    """Background task wrapper — regular def so FastAPI runs it in a thread
+    pool and Drive I/O never blocks the event loop."""
     try:
         supabase.table("download_sessions").update({
             "status": "processing"
         }).eq("id", session_id).execute()
 
-        # 1. Fetch personal photo IDs from guest_photos mapping table
-        gp_res = supabase.table("guest_photos").select("photo_id").eq("guest_id", guest_id).execute()
-        personal_ids = [str(row["photo_id"]) for row in gp_res.data] if (gp_res.data and len(gp_res.data) > 0) else []
-
-        # 2. Query photos table where is_common is true OR photo_id is in personal_ids
-        if personal_ids:
-            or_filter = f"is_common.eq.true,id.in.({','.join(personal_ids)})"
-            result = supabase.table("photos").select("drive_path, is_common").or_(or_filter).execute()
-        else:
-            result = supabase.table("photos").select("drive_path, is_common").eq("is_common", True).execute()
-
-        rows = [
-            (row["drive_path"], row.get("is_common", False), i)
-            for i, row in enumerate(result.data)
-            if row.get("drive_path")
-        ]
-
-        zip_buffer = io.BytesIO()
-        success_count = 0
-        total = len(rows)
-        log.info(f"ZIP: starting parallel download of {total} files for guest {guest_id}")
-
-        # Download all files in parallel (8 concurrent threads)
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-            with ThreadPoolExecutor(max_workers=8) as executor:
-                futures = {
-                    executor.submit(_download_one, drive_id, is_common, idx): idx
-                    for drive_id, is_common, idx in rows
-                }
-                for future in as_completed(futures):
-                    result_item = future.result()
-                    if result_item:
-                        filename, data = result_item
-                        zf.writestr(filename, data)
-                        success_count += 1
-                        if success_count % 50 == 0:
-                            log.info(f"ZIP progress: {success_count}/{total} files")
-
-        # Cache ZIP in-memory so stream endpoint serves it without rebuilding
-        zip_bytes = zip_buffer.getvalue()
-        _zip_store[session_id] = zip_bytes
+        _, success_count = _build_zip_file(guest_id, session_id)
 
         supabase.table("download_sessions").update({
             "status": "ready",
             "photo_count": success_count,
         }).eq("id", session_id).execute()
 
-        log.info(f"ZIP ready for guest {guest_id}: {success_count} files, {len(zip_bytes):,} bytes")
+        _prune_old_zips()
 
     except Exception as e:
         log.error(f"ZIP build failed for {guest_id}: {e}")
@@ -163,40 +204,19 @@ async def stream_zip(guest_id: str, session_id: str):
     if not session.data:
         raise HTTPException(status_code=404, detail="ZIP not ready yet")
 
-    # Serve from in-memory cache if available
-    zip_bytes = _zip_store.get(session_id)
+    zip_file = _zip_path(session_id)
 
-    if not zip_bytes:
-        # Fallback: rebuild if server restarted and in-memory cache was cleared
-        # 1. Fetch personal photo IDs from guest_photos mapping table
-        gp_res = supabase.table("guest_photos").select("photo_id").eq("guest_id", guest_id).execute()
-        personal_ids = [str(row["photo_id"]) for row in gp_res.data] if (gp_res.data and len(gp_res.data) > 0) else []
-
-        # 2. Query photos table where is_common is true OR photo_id is in personal_ids
-        if personal_ids:
-            or_filter = f"is_common.eq.true,id.in.({','.join(personal_ids)})"
-            result = supabase.table("photos").select("drive_path, is_common").or_(or_filter).execute()
-        else:
-            result = supabase.table("photos").select("drive_path, is_common").eq("is_common", True).execute()
-
-        rows = [
-            (row["drive_path"], row.get("is_common", False), i)
-            for i, row in enumerate(result.data)
-            if row.get("drive_path")
-        ]
-
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            with ThreadPoolExecutor(max_workers=8) as executor:
-                futures = {
-                    executor.submit(_download_one, drive_id, is_common, idx): idx
-                    for drive_id, is_common, idx in rows
-                }
-                for future in as_completed(futures):
-                    item = future.result()
-                    if item:
-                        zf.writestr(item[0], item[1])
-        zip_bytes = buf.getvalue()
+    if not zip_file.exists():
+        # Server restarted since the ZIP was built (ephemeral disk wiped).
+        # Rebuild in the threadpool so the event loop stays free — the old code
+        # rebuilt inline in this async handler and froze the whole server.
+        log.info(f"ZIP for session {session_id} missing on disk — rebuilding in threadpool")
+        from starlette.concurrency import run_in_threadpool
+        try:
+            await run_in_threadpool(_build_zip_file, guest_id, session_id)
+        except Exception as e:
+            log.error(f"ZIP rebuild failed for session {session_id}: {e}")
+            raise HTTPException(status_code=500, detail="ZIP rebuild failed. Please try again.")
 
     # Fetch guest name to customize zip filename
     guest_name = "Guest"
@@ -210,11 +230,8 @@ async def stream_zip(guest_id: str, session_id: str):
     except Exception as guest_err:
         log.warning(f"Failed to query guest name for ZIP naming: {guest_err}")
 
-    return StreamingResponse(
-        io.BytesIO(zip_bytes),
+    return FileResponse(
+        str(zip_file),
         media_type="application/zip",
-        headers={
-            "Content-Disposition": f"attachment; filename={guest_name}_wedding_photos.zip",
-            "Content-Length": str(len(zip_bytes)),
-        }
+        filename=f"{guest_name}_wedding_photos.zip",
     )

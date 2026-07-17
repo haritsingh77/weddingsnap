@@ -258,47 +258,65 @@ async def stream_photo(
         # Start a background task to download the file to the local cache folder
         background_tasks.add_task(download_to_local_cache_task, file_id, original_path)
         
-        # Immediately stream directly from Google Drive
+        # Immediately stream directly from Google Drive — fully async so a
+        # large video stream never blocks the event loop for other requests.
         log.info(f"Streaming {file_id} directly from Google Drive (not cached yet)...")
         try:
-            from google.oauth2 import service_account
-            import google.auth.transport.requests
-            import requests
-            import os
-            import json
-            
-            google_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_CONTENT")
-            if google_json:
-                info = json.loads(google_json.strip())
-                creds = service_account.Credentials.from_service_account_info(
-                    info,
-                    scopes=["https://www.googleapis.com/auth/drive"]
-                )
-            else:
-                creds = service_account.Credentials.from_service_account_file(
-                    settings.GOOGLE_SERVICE_ACCOUNT_JSON,
-                    scopes=["https://www.googleapis.com/auth/drive"]
-                )
-            auth_req = google.auth.transport.requests.Request()
-            creds.refresh(auth_req)
-            
-            drive_headers = {"Authorization": f"Bearer {creds.token}"}
-            
+            import httpx
+            from starlette.concurrency import run_in_threadpool
+
+            def _get_drive_token() -> str:
+                """Blocking credential load + refresh — runs in the threadpool."""
+                from google.oauth2 import service_account
+                import google.auth.transport.requests
+                import os
+                import json
+
+                google_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_CONTENT")
+                if google_json:
+                    info = json.loads(google_json.strip())
+                    creds = service_account.Credentials.from_service_account_info(
+                        info,
+                        scopes=["https://www.googleapis.com/auth/drive"]
+                    )
+                else:
+                    creds = service_account.Credentials.from_service_account_file(
+                        settings.GOOGLE_SERVICE_ACCOUNT_JSON,
+                        scopes=["https://www.googleapis.com/auth/drive"]
+                    )
+                creds.refresh(google.auth.transport.requests.Request())
+                return creds.token
+
+            token = await run_in_threadpool(_get_drive_token)
+
+            drive_headers = {"Authorization": f"Bearer {token}"}
+
             # Forward the Range header if present
             range_header = request.headers.get("range")
             if range_header:
                 drive_headers["Range"] = range_header
-                
+
             drive_url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
-            resp = requests.get(drive_url, headers=drive_headers, stream=True)
-            
+
+            client = httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=300.0))
+            req = client.build_request("GET", drive_url, headers=drive_headers)
+            resp = await client.send(req, stream=True)
+
             response_headers = headers.copy()
             for h in ["Content-Range", "Content-Length", "Accept-Ranges"]:
                 if h in resp.headers:
                     response_headers[h] = resp.headers[h]
-            
+
+            async def _iter_and_close():
+                try:
+                    async for chunk in resp.aiter_bytes(chunk_size=1024 * 64):
+                        yield chunk
+                finally:
+                    await resp.aclose()
+                    await client.aclose()
+
             return StreamingResponse(
-                resp.iter_content(chunk_size=1024 * 64),
+                _iter_and_close(),
                 status_code=resp.status_code,
                 media_type=mime_type,
                 headers=response_headers
