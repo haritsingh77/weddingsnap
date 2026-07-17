@@ -28,6 +28,22 @@ def _get_active_backend(records: list) -> str:
     global _active_backend
     if _active_backend:
         return _active_backend
+
+    # 1. Explicit override (FACE_BACKEND=insightface|dlib) — set this on Railway.
+    if settings.FACE_BACKEND in ("insightface", "dlib"):
+        _active_backend = settings.FACE_BACKEND
+        return _active_backend
+
+    # 2. Populated faces table implies 512-d ArcFace — required on hosted
+    #    deploys where no pkl ships in the image, so record sniffing would
+    #    wrongly fall back to dlib and encode selfies at the wrong dimension.
+    try:
+        if _db_match_available():
+            _active_backend = "insightface"
+            return _active_backend
+    except Exception:
+        pass
+
     try:
         from scripts.face_engine.matching import detect_backend_from_records, load_encodings_meta
         meta = load_encodings_meta(Path(settings.ENCODINGS_CACHE_PATH).parent)
