@@ -318,7 +318,7 @@ export default function Admin() {
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-ivory-100/70 flex items-center justify-center px-4">
-        <div className="bg-white p-8 rounded-2xl border border-gold-200/60/60 shadow-xl shadow-gold-100 max-w-md w-full">
+        <div className="bg-white p-8 rounded-2xl border border-gold-200/60 shadow-xl shadow-gold-100 max-w-md w-full">
           <div className="text-center mb-6">
             <h1 className="font-serif text-3xl text-taupe-900 mb-2">WeddingSnap</h1>
             <p className="text-taupe-400 text-sm">Enter password to access Admin Control Panel</p>
@@ -351,7 +351,7 @@ export default function Admin() {
   return (
     <div className="min-h-screen bg-ivory-100/70 pb-16">
       {/* Header */}
-      <div className="bg-white border-b border-gold-200/60/50 px-6 py-6 sticky top-0 z-20 shadow-sm">
+      <div className="bg-white border-b border-gold-200/50 px-6 py-6 sticky top-0 z-20 shadow-sm">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
           <div>
             <h1 className="font-serif text-taupe-900 text-2xl tracking-tight leading-none mb-1.5">Admin Dashboard</h1>
@@ -378,7 +378,7 @@ export default function Admin() {
         
         {/* Left Side: Create / Register Guest Form */}
         <div className="lg:col-span-1 space-y-6">
-          <div className="bg-white p-6 rounded-2xl border border-gold-200/60/50 shadow-sm">
+          <div className="bg-white p-6 rounded-2xl border border-gold-200/50 shadow-sm">
             <h2 className="font-serif text-lg text-taupe-800 mb-4 border-b border-gold-100 pb-2">Add New Guest</h2>
             <form onSubmit={handleCreateSubmit} className="space-y-4">
               <div>
@@ -444,7 +444,7 @@ export default function Admin() {
             </form>
           </div>
 
-          <div className="bg-white p-6 rounded-2xl border border-gold-200/60/50 shadow-sm">
+          <div className="bg-white p-6 rounded-2xl border border-gold-200/50 shadow-sm">
             <h2 className="font-serif text-lg text-taupe-800 mb-2">Matching Settings</h2>
             <p className="text-taupe-400 text-xs mb-4">Adjust the accuracy threshold. Higher numbers find more photos but may introduce wrong matches.</p>
             
@@ -490,7 +490,7 @@ export default function Admin() {
 
         {/* Right Side: Guest Registry List */}
         <div className="lg:col-span-2 space-y-6">
-          <div className="bg-white rounded-2xl border border-gold-200/60/50 shadow-sm overflow-hidden">
+          <div className="bg-white rounded-2xl border border-gold-200/50 shadow-sm overflow-hidden">
             <div className="px-6 py-4 border-b border-gold-100 flex items-center justify-between">
               <h2 className="font-serif text-lg text-taupe-800">Guest Directory</h2>
               <button
@@ -524,7 +524,7 @@ export default function Admin() {
                           <img
                             src={`${API_BASE}/admin/guests/${guest.id}/selfie?password=${localStorage.getItem('admin_password')}`}
                             alt="Selfie"
-                            className="w-10 h-10 rounded-full object-cover border border-gold-200/60/70"
+                            className="w-10 h-10 rounded-full object-cover border border-gold-200/70"
                             onError={(e) => {
                               // If selfie missing, show generic user icon
                               e.target.src = '/logo.png'
@@ -624,7 +624,7 @@ export default function Admin() {
                   {reviewPhotos.map((photo, index) => (
                     <div
                       key={photo.id}
-                      className="group relative aspect-square rounded-xl overflow-hidden bg-ivory-200 border border-gold-200/60/50 cursor-pointer"
+                      className="group relative aspect-square rounded-xl overflow-hidden bg-ivory-200 border border-gold-200/50 cursor-pointer"
                       onClick={() => setLightboxIndex(index)}
                     >
                       {photo.is_video ? (
@@ -844,7 +844,7 @@ export default function Admin() {
                           <img
                             src={`${API_BASE}/admin/members/${member.id}/selfie?password=${localStorage.getItem('admin_password')}`}
                             alt={member.name}
-                            className="w-10 h-10 rounded-full object-cover border border-gold-200/60/80 bg-white"
+                            className="w-10 h-10 rounded-full object-cover border border-gold-200/80 bg-white"
                             onError={(e) => { e.target.src = '/logo.png' }}
                           />
                           <span className="text-sm font-semibold text-stone-850">{member.name}</span>

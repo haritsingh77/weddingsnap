@@ -86,8 +86,30 @@ function GalleryPhotoCard({
         }
     }, [isMultiSelectMode]);
 
+    // Describes the tile for screen readers; photo content itself is unknown,
+    // so convey position and whether it's a personal match or a group shot.
+    const mediaKind = photo.is_video ? 'Video' : 'Photo';
+    const mediaScope = photo.is_common ? 'group moment' : 'moment of you';
+    const mediaLabel = `${mediaKind} ${index + 1} — ${mediaScope}`;
+
     return (
-        <div 
+        <div
+            role="button"
+            tabIndex={0}
+            aria-label={isMultiSelectMode
+                ? `${isSelected ? 'Deselect' : 'Select'} ${mediaLabel}`
+                : `Open ${mediaLabel}`}
+            aria-pressed={isMultiSelectMode ? isSelected : undefined}
+            onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    if (isMultiSelectMode) {
+                        togglePhotoSelection(photo.drive_id);
+                    } else {
+                        setLightboxIndex(index);
+                    }
+                }
+            }}
             onClick={() => {
                 if (isMultiSelectMode) {
                     togglePhotoSelection(photo.drive_id);
@@ -97,10 +119,10 @@ function GalleryPhotoCard({
             }}
             onMouseEnter={handleMouseEnter}
             onMouseLeave={handleMouseLeave}
-            className={`aspect-square relative group overflow-hidden bg-ivory-200 border rounded-2xl shadow-sm hover:shadow-md cursor-pointer transition-all duration-300 animate-fade-in-up ${
+            className={`aspect-square relative group overflow-hidden bg-ivory-200 border rounded-2xl shadow-sm hover:shadow-md cursor-pointer transition-all duration-300 animate-fade-in-up focus:outline-none focus-visible:ring-2 focus-visible:ring-gold-500 focus-visible:ring-offset-2 focus-visible:ring-offset-ivory-100 ${
                 isSelected 
                     ? 'border-gold-500 ring-2 ring-gold-550/30 scale-[0.98]' 
-                    : 'border-gold-200/60/40 hover:border-gold-200'
+                    : 'border-gold-200/40 hover:border-gold-200'
             } ${hoverProgress > 0 ? 'scale-[1.01] ring-1 ring-gold-400/40' : ''}`}
             style={{ animationDelay: `${(index % 6) * 50}ms` }}
         >
@@ -170,8 +192,9 @@ function GalleryPhotoCard({
             ) : (
                 <img
                     src={`${API_BASE}${photo.thumb_url}`}
-                    alt=""
+                    alt={mediaLabel}
                     loading="lazy"
+                    decoding="async"
                     className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
                 />
             )}
@@ -225,6 +248,10 @@ export default function Gallery() {
     const [hasMore, setHasMore] = useState(false)
     const [total, setTotal] = useState(0)
     const [tab, setTab] = useState('all')  // all | mine | common | people
+    // The guest's OWN matched count, independent of the active tab. The header
+    // must never show the "All Moments" total (that's every file in the Drive,
+    // not photos matched to this guest).
+    const [myMatchCount, setMyMatchCount] = useState(null)
     
     // Family Profile states
     const [familyMembers, setFamilyMembers] = useState([])
@@ -315,6 +342,9 @@ export default function Gallery() {
             })
             setHasMore(has_more)
             setTotal(totalPhotos)
+            // Personal tabs report the guest's real matched total — capture it
+            // for the header regardless of which tab the user is browsing.
+            if (tab !== 'all') setMyMatchCount(totalPhotos)
             setPage(p)
         } catch (err) {
             console.error('Failed to fetch photos:', err)
@@ -329,6 +359,17 @@ export default function Gallery() {
             setLoading(false)
         }
     }, [guestId, navigate, tab])
+
+    // Fetch the guest's own matched count once on mount, so the header is
+    // accurate even when they land on the "All Moments" tab.
+    useEffect(() => {
+        if (!guestId) return
+        let cancelled = false
+        getPhotos(guestId, 1)
+            .then(res => { if (!cancelled) setMyMatchCount(res.data?.total ?? 0) })
+            .catch(() => { if (!cancelled) setMyMatchCount(null) })
+        return () => { cancelled = true }
+    }, [guestId])
 
     // Re-fetch when tab changes between 'all' and personal tabs
     useEffect(() => {
@@ -816,47 +857,53 @@ export default function Gallery() {
     }, [lightboxIndex, filtered])
 
     const activePhoto = lightboxIndex !== null ? filtered[lightboxIndex] : null
-    console.log("Gallery State - lightboxIndex:", lightboxIndex, "filtered.length:", filtered.length, "activePhoto:", activePhoto);
 
     return (
         <>
             <div className="min-h-screen bg-ivory-100/70 select-none pb-12 animate-fade-in-up">
             
             {/* Elegant Header */}
-            <div className="bg-white/80 backdrop-blur-md border-b border-gold-200/60/50 px-6 py-6 sticky top-0 z-20">
-                <div className="max-w-4xl mx-auto flex items-center justify-between">
-                    <div className="flex items-center gap-4">
+            <div className="bg-white/80 backdrop-blur-md border-b border-gold-200/50 px-4 sm:px-6 py-4 sm:py-6 sticky top-0 z-20">
+                <div className="max-w-4xl mx-auto flex flex-wrap items-center justify-between gap-y-3">
+                    <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
                         <img
                             src="/logo.png"
                             alt="Logo"
-                            className="w-14 h-14 object-contain rounded-full shadow-md shadow-gold-100 border border-gold-200/10 bg-white p-0.5"
+                            className="w-11 h-11 sm:w-14 sm:h-14 shrink-0 object-contain rounded-full shadow-md shadow-gold-100 border border-gold-200/10 bg-white p-0.5"
                         />
-                        <div>
-                            <h1 className="font-serif text-taupe-900 text-xl tracking-tight leading-none mb-1.5">{eventName || 'Wedding Gallery'}</h1>
-                            <p className="text-taupe-400 text-xs tracking-wide">
-                                {total > 0 ? `${total} matched moments found for ${guestName?.split(' ')[0]}` : 'Matching moments...'}
+                        <div className="min-w-0">
+                            <h1 className="font-serif text-taupe-900 text-lg sm:text-xl tracking-tight leading-tight mb-1 truncate">{eventName || 'Wedding Gallery'}</h1>
+                            <p className="text-taupe-400 text-xs tracking-wide truncate">
+                                {myMatchCount === null
+                                    ? 'Finding your moments…'
+                                    : myMatchCount > 0
+                                        ? `${myMatchCount} ${myMatchCount === 1 ? 'moment' : 'moments'} of ${guestName?.split(' ')[0]}`
+                                        : `Browsing all moments · none matched to ${guestName?.split(' ')[0]} yet`}
                             </p>
                         </div>
                     </div>
                     
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 shrink-0">
                         <button
                             onClick={() => navigate('/register')}
-                            className="bg-white border border-gold-200/60 text-taupe-700 text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-ivory-100 hover:border-gold-200 transition-all duration-300 cursor-pointer"
+                            title="Re-scan your face"
+                            className="bg-white border border-gold-200/60 text-taupe-700 text-xs font-semibold px-3 sm:px-4 py-2.5 rounded-xl whitespace-nowrap hover:bg-ivory-100 hover:border-gold-200 transition-all duration-300 cursor-pointer"
                         >
-                            📸 Re-Scan Face
+                            <span aria-hidden="true">📸</span>
+                            <span className="hidden sm:inline"> Re-Scan Face</span>
+                            <span className="sr-only">Re-scan face</span>
                         </button>
                         <button
                             onClick={() => navigate('/download')}
-                            className="bg-taupe-800 text-white text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-gold-600 hover:shadow-lg hover:shadow-gold-500/20 transition-all duration-300 cursor-pointer"
+                            className="bg-taupe-800 text-white text-xs font-semibold px-3 sm:px-4 py-2.5 rounded-xl whitespace-nowrap hover:bg-gold-600 hover:shadow-lg hover:shadow-gold-500/20 transition-all duration-300 cursor-pointer"
                         >
-                            Download All
+                            Download<span className="hidden sm:inline"> All</span>
                         </button>
                     </div>
                 </div>
 
                 {/* Aesthetic Navigation Tabs */}
-                <div className="max-w-4xl mx-auto flex gap-6 mt-6 border-t border-gold-100 pt-4 overflow-x-auto whitespace-nowrap scrollbar-none">
+                <div className="max-w-4xl mx-auto flex gap-5 sm:gap-6 mt-4 sm:mt-6 border-t border-gold-100 pt-4 overflow-x-auto whitespace-nowrap scrollbar-none -mx-4 px-4 sm:mx-0 sm:px-0">
                     {['all', 'mine', 'common', 'people', 'categories'].filter(t => t !== 'people' || isAdmin).map(t => (
                         <button
                             key={t}
@@ -868,7 +915,7 @@ export default function Gallery() {
                                 setSelectedPhotos([])
                                 setActiveFamilyMemberId(null)
                             }}
-                            className={`text-xs uppercase tracking-widest font-semibold pb-1.5 border-b-2 transition-all duration-300 cursor-pointer ${tab === t
+                            className={`shrink-0 text-xs uppercase tracking-widest font-semibold pb-1.5 border-b-2 transition-all duration-300 cursor-pointer ${tab === t
                                     ? 'border-gold-500 text-taupe-900'
                                     : 'border-transparent text-taupe-300 hover:text-taupe-500'
                                 }`}
@@ -914,7 +961,7 @@ export default function Gallery() {
                     ) : (
                         <div className="space-y-6">
                             {isAdmin && (
-                                <div className="flex justify-between items-center mb-6 pb-2 border-b border-gold-200/60/50">
+                                <div className="flex justify-between items-center mb-6 pb-2 border-b border-gold-200/50">
                                     <div>
                                         <h2 className="font-serif text-taupe-900 text-base">Group Face Folders</h2>
                                         <p className="text-taupe-400 text-xs mt-0.5">Combine raw face clusters together.</p>
@@ -1067,7 +1114,7 @@ export default function Gallery() {
                         onDragOver={(e) => e.preventDefault()}
                         onDrop={(e) => handleDrop(e, null)}
                     >
-                        <div className="flex justify-between items-center border-b border-gold-200/60/50 pb-4">
+                        <div className="flex justify-between items-center border-b border-gold-200/50 pb-4">
                             <div>
                                 <h2 className="font-serif text-taupe-900 text-lg">Dynamic Albums</h2>
                                 <p className="text-taupe-400 text-xs mt-0.5">Drag & drop files or folders anywhere to upload.</p>
@@ -1084,7 +1131,7 @@ export default function Gallery() {
 
                         {/* Uploading Status */}
                         {uploadingFiles.length > 0 && (
-                            <div className="bg-white border border-gold-200/60/80 rounded-2xl p-4 shadow-lg flex flex-col gap-2 animate-fade-in-up">
+                            <div className="bg-white border border-gold-200/80 rounded-2xl p-4 shadow-lg flex flex-col gap-2 animate-fade-in-up">
                                 <h4 className="text-xs font-bold text-taupe-500 uppercase tracking-wider">Uploading Files...</h4>
                                 <div className="max-h-32 overflow-y-auto space-y-1.5 font-mono text-[10px]">
                                     {uploadingFiles.map((file, idx) => (
@@ -1137,7 +1184,7 @@ export default function Gallery() {
                                     <div
                                         key={cat.name}
                                         onClick={() => handleCategoryClick(cat.name)}
-                                        className="group flex flex-col gap-3 cursor-pointer bg-white/70 border border-gold-200/60/50 rounded-2xl p-4 shadow-sm hover:shadow-md hover:border-gold-300 transition-all duration-300 animate-fade-in-up"
+                                        className="group flex flex-col gap-3 cursor-pointer bg-white/70 border border-gold-200/50 rounded-2xl p-4 shadow-sm hover:shadow-md hover:border-gold-300 transition-all duration-300 animate-fade-in-up"
                                     >
                                         <div className="aspect-[4/3] relative rounded-xl overflow-hidden bg-ivory-200 border border-gold-100 shadow-inner">
                                             {cat.thumbnail_url ? (
@@ -1173,13 +1220,15 @@ export default function Gallery() {
                     <>
                         {/* Standard Tabs Header / Action Bar */}
                         {!selectedCluster && !selectedCategory && (tab === 'all' || tab === 'mine' || tab === 'common') && (
-                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 mb-8 pb-6 border-b border-gold-200/60/50">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 mb-8 pb-6 border-b border-gold-200/50">
                                 <div>
                                     <h2 className="font-serif text-taupe-900 text-xl sm:text-2xl tracking-tight leading-none">
                                         {tab === 'all' ? 'All Moments' : tab === 'mine' ? 'Just Me' : 'Group Moments'}
                                     </h2>
                                     <p className="text-taupe-400 text-xs font-medium mt-1.5">
-                                        {tab === 'all' && total > 0 ? `${total} moments available` : `${filtered.length} moments shown`}
+                                        {tab === 'all' && total > 0
+                                            ? `${total.toLocaleString()} moments in the full gallery`
+                                            : `${filtered.length} ${filtered.length === 1 ? 'moment' : 'moments'} shown`}
                                     </p>
                                 </div>
                                 
@@ -1233,7 +1282,7 @@ export default function Gallery() {
                             const thumbnail = clusterObj?.thumbnail_url ? `${API_BASE}${clusterObj.thumbnail_url}?t=${clusterCacheBuster}` : null;
 
                             return (
-                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 mb-8 pb-6 border-b border-gold-200/60/50">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 mb-8 pb-6 border-b border-gold-200/50">
                                     <div className="flex items-center gap-4">
                                         <button
                                             onClick={() => {
@@ -1248,7 +1297,7 @@ export default function Gallery() {
                                         
                                         {/* Avatar with Change Photo option */}
                                         <div className="relative cursor-pointer w-20 h-20 sm:w-24 sm:h-24 flex-shrink-0">
-                                            <div className="w-full h-full rounded-full overflow-hidden border border-gold-200/60/50 shadow-md">
+                                            <div className="w-full h-full rounded-full overflow-hidden border border-gold-200/50 shadow-md">
                                                 {thumbnail ? (
                                                     <img 
                                                         src={thumbnail} 
@@ -1380,7 +1429,7 @@ export default function Gallery() {
                                 onDragOver={(e) => e.preventDefault()}
                                 onDrop={(e) => handleDrop(e, selectedCategory)}
                             >
-                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 pb-4 border-b border-gold-200/60/50">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 pb-4 border-b border-gold-200/50">
                                     <div className="flex items-center gap-4">
                                         <button
                                             onClick={() => {
@@ -1461,7 +1510,7 @@ export default function Gallery() {
                                 )}
 
                                 {uploadingFiles.length > 0 && (
-                                    <div className="bg-white border border-gold-200/60/80 rounded-2xl p-4 shadow-lg flex flex-col gap-2">
+                                    <div className="bg-white border border-gold-200/80 rounded-2xl p-4 shadow-lg flex flex-col gap-2">
                                         <h4 className="text-xs font-bold text-taupe-500 uppercase tracking-wider">Uploading Files...</h4>
                                         <div className="max-h-32 overflow-y-auto space-y-1.5 font-mono text-[10px]">
                                             {uploadingFiles.map((file, idx) => (
@@ -1484,7 +1533,7 @@ export default function Gallery() {
 
                         {/* Family Navigation Pill Bar */}
                         {familyMembers.length > 0 && tab === 'mine' && !selectedCluster && !selectedCategory && (
-                            <div className="mb-6 p-4 bg-white/40 backdrop-blur-md border border-gold-200/60/40 rounded-2xl shadow-sm">
+                            <div className="mb-6 p-4 bg-white/40 backdrop-blur-md border border-gold-200/40 rounded-2xl shadow-sm">
                                 <h3 className="text-[10px] font-bold text-taupe-400 uppercase tracking-widest mb-3 px-1 flex items-center gap-1.5">
                                     <span>👨‍👩‍👧‍👦</span> Household Members
                                 </h3>
@@ -1495,7 +1544,7 @@ export default function Gallery() {
                                         className={`snap-start flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold tracking-wide transition-all duration-300 shadow-xs cursor-pointer ${
                                             activeFamilyMemberId === null
                                                 ? 'bg-taupe-800 text-white shadow-md shadow-taupe-900/10'
-                                                : 'bg-white/70 text-taupe-600 hover:bg-white hover:text-taupe-900 border border-gold-200/60/40'
+                                                : 'bg-white/70 text-taupe-600 hover:bg-white hover:text-taupe-900 border border-gold-200/40'
                                         }`}
                                     >
                                         <span className="text-sm">👨‍👩‍👧‍👦</span>
@@ -1512,7 +1561,7 @@ export default function Gallery() {
                                                 className={`snap-start flex items-center gap-2.5 px-3.5 py-2 rounded-xl text-xs font-semibold tracking-wide transition-all duration-300 shadow-xs cursor-pointer ${
                                                     isActive
                                                         ? 'bg-gold-500 text-white shadow-md shadow-gold-500/15'
-                                                        : 'bg-white/70 text-taupe-600 hover:bg-white hover:text-taupe-900 border border-gold-200/60/40'
+                                                        : 'bg-white/70 text-taupe-600 hover:bg-white hover:text-taupe-900 border border-gold-200/40'
                                                 }`}
                                             >
                                                 <div className="w-5 h-5 rounded-full overflow-hidden border border-gold-200/60 bg-ivory-200 flex-shrink-0 flex items-center justify-center">
@@ -1673,7 +1722,11 @@ export default function Gallery() {
                                 <span className="font-semibold uppercase tracking-wider text-gold-400 block truncate">
                                     {activePhoto.is_video ? '🎥 Video' : activePhoto.is_common ? '👥 Group Moment' : '👤 Personal Moment'}
                                 </span>
-                                <p className="text-white/40 mt-1 font-mono text-[10px] truncate">{activePhoto.drive_id}</p>
+                                {/* Position in the set — the raw Drive file id used to be
+                                    shown here, which is meaningless to a guest. */}
+                                <p className="text-white/50 mt-1 text-[11px] truncate">
+                                    {lightboxIndex + 1} of {filtered.length}
+                                </p>
                             </div>
 
                             <div className="flex items-center gap-2 flex-shrink-0">
@@ -1777,7 +1830,7 @@ export default function Gallery() {
             {/* CREATE ALBUM MODAL */}
             {showCreateCategoryModal && (
                 <div className="fixed inset-0 z-55 bg-taupe-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl border border-gold-200/60/80 animate-fade-in-up">
+                    <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl border border-gold-200/80 animate-fade-in-up">
                         <div className="px-6 py-4 border-b border-stone-150 flex items-center justify-between">
                             <div>
                                 <h3 className="font-serif text-lg text-taupe-900 leading-none mb-1">Create New Album</h3>
@@ -1871,7 +1924,7 @@ export default function Gallery() {
                                         <div 
                                             key={i}
                                             onClick={() => handleSetProfilePic(photo.drive_id)}
-                                            className="aspect-square relative group overflow-hidden bg-ivory-200 border border-gold-200/60/50 rounded-xl cursor-pointer hover:border-gold-500 hover:shadow transition-all duration-300"
+                                            className="aspect-square relative group overflow-hidden bg-ivory-200 border border-gold-200/50 rounded-xl cursor-pointer hover:border-gold-500 hover:shadow transition-all duration-300"
                                         >
                                             <img 
                                                 src={`${API_BASE}${photo.thumb_url}`} 
@@ -1892,7 +1945,7 @@ export default function Gallery() {
             {showShareDropdown && activePhoto && (
                 <div className="fixed inset-0 z-55 bg-taupe-900/65 backdrop-blur-xs flex items-center justify-center p-4" onClick={() => setShowShareDropdown(false)}>
                     <div 
-                        className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl border border-gold-200/60/80 animate-fade-in-up flex flex-col max-h-[75vh]"
+                        className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl border border-gold-200/80 animate-fade-in-up flex flex-col max-h-[75vh]"
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div className="px-6 py-4 border-b border-stone-150 flex items-center justify-between">
