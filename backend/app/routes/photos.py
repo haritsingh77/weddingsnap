@@ -245,7 +245,9 @@ async def stream_photo(
     if download:
         filename = f"wedding_media_{file_id}"
         try:
-            name_to_id = build_filename_to_id_map()
+            # May hit Supabase Storage / the Drive API — keep it off the event loop
+            from starlette.concurrency import run_in_threadpool
+            name_to_id = await run_in_threadpool(build_filename_to_id_map)
             for name, fid in name_to_id.items():
                 if fid == file_id:
                     filename = name
@@ -268,7 +270,8 @@ async def stream_photo(
             def _get_drive_token() -> str:
                 """Blocking credential load + refresh — runs in the threadpool."""
                 from google.oauth2 import service_account
-                import google.auth.transport.requests
+                import google_auth_httplib2
+                import httplib2
                 import os
                 import json
 
@@ -284,7 +287,9 @@ async def stream_photo(
                         settings.GOOGLE_SERVICE_ACCOUNT_JSON,
                         scopes=["https://www.googleapis.com/auth/drive"]
                     )
-                creds.refresh(google.auth.transport.requests.Request())
+                # google_auth_httplib2 keeps this off the transitive-only
+                # `requests` package (google-auth-httplib2 is a declared dep).
+                creds.refresh(google_auth_httplib2.Request(httplib2.Http()))
                 return creds.token
 
             token = await run_in_threadpool(_get_drive_token)
@@ -298,9 +303,16 @@ async def stream_photo(
 
             drive_url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
 
+            # Opened manually (not as a context manager) so it outlives this
+            # scope for the StreamingResponse; the generator closes it. If the
+            # send itself fails the client would leak, so close it explicitly.
             client = httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=300.0))
-            req = client.build_request("GET", drive_url, headers=drive_headers)
-            resp = await client.send(req, stream=True)
+            try:
+                req = client.build_request("GET", drive_url, headers=drive_headers)
+                resp = await client.send(req, stream=True)
+            except BaseException:
+                await client.aclose()
+                raise
 
             response_headers = headers.copy()
             for h in ["Content-Range", "Content-Length", "Accept-Ranges"]:
