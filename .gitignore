@@ -43,3 +43,7 @@ scratch/
 *.log
 backend/*.log
 
+
+# Claude Code: keep launch.json, exclude local agent worktrees & state
+.claude/worktrees/
+.claude/settings.local.json
