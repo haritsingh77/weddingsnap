@@ -1717,7 +1717,7 @@ export default function Gallery() {
                         )}
                         
                         {/* Caption & Download bar */}
-                        <div className="w-full flex items-center justify-between mt-4 text-white px-2 gap-4">
+                        <div className="w-full flex flex-col sm:flex-row sm:items-center justify-between mt-4 text-white px-2 gap-3 sm:gap-4">
                             <div className="text-xs min-w-0">
                                 <span className="font-semibold uppercase tracking-wider text-gold-400 block truncate">
                                     {activePhoto.is_video ? '🎥 Video' : activePhoto.is_common ? '👥 Group Moment' : '👤 Personal Moment'}
