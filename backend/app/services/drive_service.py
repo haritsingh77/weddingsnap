@@ -145,13 +145,6 @@ def get_all_photos() -> list[dict]:
     return list_files_in_folder(settings.GOOGLE_DRIVE_FOLDER_ID, media_type="photos")
 
 
-def get_all_videos() -> list[dict]:
-    return list_files_in_folder(settings.GOOGLE_DRIVE_FOLDER_ID, media_type="videos")
-
-
-# ── File access ───────────────────────────────────────────────────────────────
-
-
 def get_file_metadata(file_id: str) -> Optional[dict]:
     """Fetch metadata for a single file."""
     try:
@@ -297,59 +290,6 @@ def download_file_from_drive(file_id: str, dest_path: Path) -> bool:
                 return False
 
 
-def generate_signed_url(file_id: str) -> str:
-    """
-    Returns a direct viewable link for a Drive file.
-    Note: works because service account has viewer access.
-    For extra security we serve files through our backend proxy instead.
-    """
-    return f"https://drive.google.com/uc?export=download&id={file_id}"
-
-
-# ── Sync utility ──────────────────────────────────────────────────────────────
-
-
-def get_folder_structure(include_counts: bool = False) -> dict:
-    """
-    Returns the full folder tree for debugging.
-    Maps camera folder names to their file lists.
-    """
-    root_id = settings.GOOGLE_DRIVE_FOLDER_ID
-    structure = {"PHOTOS": {}, "VIDEOS": {}}
-
-    # Get top-level subfolders (Photos, Videos)
-    top_files = execute_with_retry(
-        lambda service: service.files().list(
-            q=f"'{root_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false",
-            fields="files(id, name)",
-        )
-    )
-    top = top_files.get("files", [])
-
-    for folder in top:
-        name = folder["name"]  # Photos or Videos
-        if name not in structure:
-            continue
-
-        # Get camera subfolders
-        subs_files = execute_with_retry(
-            lambda service: service.files().list(
-                q=f"'{folder['id']}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false",
-                fields="files(id, name)",
-            )
-        )
-        subs = subs_files.get("files", [])
-
-        for sub in subs:
-            folder_info = {"folder_id": sub["id"]}
-            if include_counts:
-                folder_info["file_count"] = len(list_files_in_folder(sub["id"]))
-
-            structure[name][sub["name"]] = folder_info
-
-    return structure
-
-
 def build_filename_to_id_map() -> dict[str, str]:
     """
     Returns a dict mapping filename → Drive file ID.
@@ -426,114 +366,6 @@ def get_cache_folder_id() -> str:
         log.error(f"Failed to get or create WeddingSnap Cache folder: {e}")
         # Fall back to root folder if cache folder creation fails
         return settings.GOOGLE_DRIVE_FOLDER_ID
-
-
-def upload_file_to_drive(file_path: Path, filename: str, folder_id: str = None) -> bool:
-    """Upload or update a local file in the Google Drive cache folder."""
-    if folder_id is None:
-        folder_id = get_cache_folder_id()
-
-    max_retries = 3
-    import time
-    for attempt in range(max_retries):
-        try:
-            service = get_drive_service()
-
-            # 1. Search if the file already exists in the target folder
-            q = f"'{folder_id}' in parents and name='{filename}' and trashed = false"
-            resp = service.files().list(q=q, fields="files(id)").execute()
-            files = resp.get("files", [])
-
-            media = MediaFileUpload(
-                str(file_path), mimetype="application/octet-stream", resumable=True
-            )
-
-            if files:
-                # File exists, update content
-                file_id = files[0]["id"]
-                service.files().update(fileId=file_id, media_body=media).execute()
-                log.info(
-                    f"Uploaded and updated Google Drive file: {filename} (ID: {file_id})"
-                )
-            else:
-                # File does not exist, create it
-                file_metadata = {"name": filename, "parents": [folder_id]}
-                new_file = (
-                    service.files()
-                    .create(body=file_metadata, media_body=media, fields="id")
-                    .execute()
-                )
-                log.info(
-                    f"Uploaded new Google Drive file: {filename} (ID: {new_file['id']})"
-                )
-            return True
-        except Exception as e:
-            err_str = str(e).lower()
-            is_conn_error = any(
-                term in err_str 
-                for term in ["eof occurred in violation of protocol", "broken pipe", "connection reset", "ssl", "timeout", "socket"]
-            )
-            if is_conn_error and attempt < max_retries - 1:
-                log.warning(f"Upload of {filename} failed (SSL/connection error): {e}. Retrying with fresh service (attempt {attempt + 1}/{max_retries})...")
-                if hasattr(_thread_local, "service"):
-                    delattr(_thread_local, "service")
-                time.sleep(0.5)
-                continue
-            else:
-                log.error(f"Failed to upload {filename} to Google Drive after {attempt + 1} attempts: {e}")
-                return False
-
-
-def download_file_by_name(
-    filename: str, dest_path: Path, folder_id: str = None
-) -> bool:
-    """Download a file by name from the Google Drive cache folder."""
-    if folder_id is None:
-        folder_id = get_cache_folder_id()
-
-    max_retries = 3
-    import time
-    for attempt in range(max_retries):
-        try:
-            service = get_drive_service()
-            q = f"'{folder_id}' in parents and name='{filename}' and trashed = false"
-            resp = service.files().list(q=q, fields="files(id)").execute()
-            files = resp.get("files", [])
-
-            if not files:
-                log.info(
-                    f"File {filename} not found on Google Drive (this is normal for a fresh run)."
-                )
-                return False
-
-            file_id = files[0]["id"]
-            dest_path.parent.mkdir(parents=True, exist_ok=True)
-
-            log.info(f"Downloading {filename} from Google Drive (ID: {file_id})...")
-            request = service.files().get_media(fileId=file_id)
-            with open(dest_path, "wb") as f:
-                downloader = MediaIoBaseDownload(f, request, chunksize=1024 * 1024 * 5)
-                done = False
-                while not done:
-                    _, done = downloader.next_chunk()
-
-            log.info(f"Successfully downloaded {filename} to {dest_path}")
-            return True
-        except Exception as e:
-            err_str = str(e).lower()
-            is_conn_error = any(
-                term in err_str 
-                for term in ["eof occurred in violation of protocol", "broken pipe", "connection reset", "ssl", "timeout", "socket"]
-            )
-            if is_conn_error and attempt < max_retries - 1:
-                log.warning(f"Download of {filename} failed (SSL/connection error): {e}. Retrying with fresh service (attempt {attempt + 1}/{max_retries})...")
-                if hasattr(_thread_local, "service"):
-                    delattr(_thread_local, "service")
-                time.sleep(0.5)
-                continue
-            else:
-                log.error(f"Failed to download {filename} from Google Drive after {attempt + 1} attempts: {e}")
-                return False
 
 
 def get_or_create_drive_folder(name: str, parent_id: str = None) -> str:

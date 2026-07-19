@@ -359,6 +359,22 @@ def get_face_clusters() -> dict:
         clusters[label_str]["members"].append(origin)
         clusters[label_str]["photos"].add(origin["path"])
 
+    # Drop one-off faces before they become browsable "people". At 30k+ faces a
+    # wedding crowd yields thousands of clusters, most of them a stranger caught
+    # once in a background — they swamp the People tab and hide the real guests.
+    # A genuine attendee appears in several photos, so require a floor.
+    import os
+    min_photos = int(os.getenv("MIN_CLUSTER_PHOTOS", "3"))
+    total_raw = len(clusters)
+    clusters = {
+        lbl: data for lbl, data in clusters.items()
+        if len(data["photos"]) >= min_photos
+    }
+    log.info(
+        "Clusters: %d raw → %d shown (min %d photos each)",
+        total_raw, len(clusters), min_photos,
+    )
+
     result: dict = {}
     for label_str, data in clusters.items():
         # Prefer a photo (not video) as the representative thumbnail

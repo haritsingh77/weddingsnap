@@ -215,10 +215,21 @@ def assign_clusters(sb, face_rows: list[dict], snapshot: tuple[dict, dict]) -> N
     print(f"Clustering {len(embs):,} faces (threshold={threshold})...")
     labels = _cluster_labels(np.asarray(embs, dtype=np.float32), threshold)
 
+    # Require a person to appear in several DISTINCT photos before they become a
+    # browsable cluster. Counting faces instead of photos would promote anyone
+    # caught repeatedly in one burst; counting photos tracks real attendance.
+    min_photos = int(os.getenv("MIN_CLUSTER_PHOTOS", "3"))
     groups: dict[int, list[int]] = {}
     for idx, label in enumerate(labels):
         groups.setdefault(int(label), []).append(idx)
-    groups = {lbl: idxs for lbl, idxs in groups.items() if len(idxs) >= 2}
+
+    raw_groups = len(groups)
+    groups = {
+        lbl: idxs for lbl, idxs in groups.items()
+        if len({keys[i][0] for i in idxs}) >= min_photos   # keys[i][0] = filename
+    }
+    print(f"  {raw_groups:,} raw groups → {len(groups):,} people "
+          f"(min {min_photos} distinct photos each)")
 
     reused = created = preserved_names = 0
     used_old: set[int] = set()

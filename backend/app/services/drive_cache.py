@@ -37,11 +37,6 @@ LOCAL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 BUCKET_NAME = "weddingsnap-cache"
 
 
-def reload_indexes():
-    """Dummy function to preserve compatibility with existing routes."""
-    pass
-
-
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def get_cached_file(filename: str) -> Optional[bytes]:
