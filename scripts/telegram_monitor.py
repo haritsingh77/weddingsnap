@@ -12,15 +12,27 @@ sys.path.append(str(project_root))
 from scripts.telegram_bot_listener import get_preprocessor_stats, send_reply
 
 def main():
-    print("Telegram 2-hour monitor script started.")
-    
+    import argparse
+
+    ap = argparse.ArgumentParser(description="Periodic Telegram status reporter")
+    ap.add_argument(
+        "--interval-hours",
+        type=float,
+        default=float(os.getenv("TELEGRAM_REPORT_INTERVAL_HOURS", "3")),
+        help="Hours between reports (default 3, or TELEGRAM_REPORT_INTERVAL_HOURS)",
+    )
+    args = ap.parse_args()
+    interval = max(60.0, args.interval_hours * 3600)
+
+    print(f"Telegram monitor started — reporting every {args.interval_hours}h.")
+
     # Load env variables
     env_path = project_root / "backend" / ".env"
     if env_path.exists():
         load_dotenv(dotenv_path=env_path)
-    
+
     chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
-    
+
     if not chat_id:
         print("Error: TELEGRAM_CHAT_ID is not set in environment or backend/.env.")
         return
@@ -33,11 +45,10 @@ def main():
     except Exception as e:
         print(f"Error sending initial report: {e}")
 
-    # Loop indefinitely, sending reports every 2 hours
     while True:
         try:
-            print("Sleeping for 2 hours before the next status update...")
-            time.sleep(7200)  # 2 hours
+            print(f"Sleeping {args.interval_hours}h before the next status update...")
+            time.sleep(interval)
             stats = get_preprocessor_stats()
             send_reply(chat_id, stats)
             print("Periodic status report sent to Telegram.")

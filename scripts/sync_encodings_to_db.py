@@ -33,6 +33,8 @@ import numpy as np
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
+from scripts.face_engine.matching import drive_id_from_path
+
 BUCKET = "weddingsnap-cache"
 BATCH = 100  # rows per insert request (512-d embeddings ≈ 10 KB each as JSON)
 
@@ -68,9 +70,17 @@ def sync_faces(sb, records: list[dict], fname_to_drive: dict[str, str]) -> list[
     face_rows: list[dict] = []
     skipped_dim = 0
 
+    ambiguous = 0
     for rec in records:
         filename = Path(rec["path"]).name
-        drive_id = fname_to_drive.get(filename)
+        # Prefer the id captured at preprocess time. The filename map is
+        # name -> id, so duplicate basenames collapse (11,049 Drive files ->
+        # 8,183 entries) and a name lookup silently returns another photo's id.
+        drive_id = rec.get("drive_id") or drive_id_from_path(rec["path"])
+        if not drive_id:
+            drive_id = fname_to_drive.get(filename)
+            if drive_id:
+                ambiguous += 1
         encodings = rec.get("encodings", [])
         locations = rec.get("locations", [None] * len(encodings))
         frames = rec.get("frame_indices", [None] * len(encodings))
@@ -99,6 +109,11 @@ def sync_faces(sb, records: list[dict], fname_to_drive: dict[str, str]) -> list[
     if skipped_dim:
         print(f"! Skipped {skipped_dim} non-512-d encodings (dlib?). "
               f"The faces table is ArcFace-only; re-preprocess with insightface.")
+    if ambiguous:
+        print(f"! {ambiguous:,} records carried no drive_id and fell back to a "
+              f"basename lookup — those are from a pre-fix preprocess run and may "
+              f"resolve to the WRONG photo where filenames collide. Re-preprocess "
+              f"to make them unambiguous.")
     if not face_rows:
         sys.exit("No 512-d faces to sync — nothing done.")
 

@@ -184,7 +184,7 @@ from sklearn.cluster import AgglomerativeClustering
 from fastapi import Response
 from googleapiclient.http import MediaIoBaseDownload
 
-from app.services.face_service import load_encodings, get_filename_map
+from app.services.face_service import load_encodings, get_filename_map, resolve_one_drive_id
 from app.services.drive_service import get_drive_service, download_file_to_memory, download_file_from_drive
 from app.config import settings
 
@@ -338,9 +338,9 @@ def get_face_clusters() -> dict:
     backend = "dlib"
     cluster_threshold = settings.FACE_MATCH_TOLERANCE
     try:
-        from scripts.face_engine.matching import detect_backend_from_records, default_tolerance
+        from scripts.face_engine.matching import detect_backend_from_records, cluster_tolerance
         backend = detect_backend_from_records(all_records)
-        cluster_threshold = default_tolerance(backend)
+        cluster_threshold = cluster_tolerance(backend)
     except Exception:
         pass
 
@@ -470,8 +470,7 @@ def get_clusters():
         else:
             rep = cdata["representative"]
 
-        filename = Path(rep["path"]).name
-        drive_id = mapping.get(filename, "")
+        drive_id = resolve_one_drive_id(rep["path"])
         loc = rep["location"]
         rep_key = f"{drive_id}_{loc[0]}_{loc[1]}_{loc[2]}_{loc[3]}"
 
@@ -545,9 +544,8 @@ def rename_cluster(cluster_id: str, body: RenameClusterRequest):
         raise HTTPException(status_code=404, detail="Cluster not found")
 
     rep = clusters[cluster_id]["representative"]
-    filename = Path(rep["path"]).name
-    mapping = get_filename_map()
-    drive_id = mapping.get(filename, "")
+    from app.services.face_service import resolve_one_drive_id
+    drive_id = resolve_one_drive_id(rep["path"])
     loc = rep["location"]
     rep_key = f"{drive_id}_{loc[0]}_{loc[1]}_{loc[2]}_{loc[3]}"
 
@@ -673,12 +671,12 @@ def get_cluster_photos(cluster_id: str):
 
     paths = clusters[cluster_id]["photos"]
     resolved = []
-    mapping = get_filename_map()
+    from app.services.face_service import resolve_one_drive_id
 
     for path in paths:
         filename = Path(path).name
-        if filename in mapping:
-            drive_id = mapping[filename]
+        drive_id = resolve_one_drive_id(path)
+        if drive_id:
             is_video = filename.lower().endswith(
                 (".mp4", ".mov", ".avi", ".mkv", ".webm")
             )
@@ -707,13 +705,12 @@ def get_face_crop_bytes(rep: dict) -> bytes:
     frame_idx = rep.get("frame_idx")
 
     filename = Path(path_str).name
-    mapping = get_filename_map()
-    if filename not in mapping:
+    from app.services.face_service import resolve_one_drive_id
+    drive_id = resolve_one_drive_id(path_str)
+    if not drive_id:
         raise HTTPException(
             status_code=404, detail="Source media file not found in Google Drive"
         )
-
-    drive_id = mapping[filename]
 
     # ── Use stable, unique cache key based on file ID and face location ─────────
     cache_key = f"face_cluster_{drive_id}_{location[0]}_{location[1]}_{location[2]}_{location[3]}.jpg"
@@ -960,9 +957,8 @@ def auto_name_cluster_for_guest(guest_name: str, selfie_bytes: bytes):
             rep = label_members[0]
 
         # Get stable key for representative face
-        filename = Path(rep["path"]).name
-        mapping = get_filename_map()
-        drive_id = mapping.get(filename, "")
+        from app.services.face_service import resolve_one_drive_id
+        drive_id = resolve_one_drive_id(rep["path"])
         loc = rep["location"]
         rep_key = f"{drive_id}_{loc[0]}_{loc[1]}_{loc[2]}_{loc[3]}"
 
@@ -995,23 +991,18 @@ def set_cluster_profile_pic(cluster_id: str, body: SetProfilePicRequest):
     
     # 1. Load face encodings/records
     all_records = load_encodings()
-    mapping = get_filename_map()
-    
-    # Find matching record in face_encodings
-    matching_filename = None
-    for fname, did in mapping.items():
-        if did == body.drive_id:
-            matching_filename = fname
-            break
-            
-    if not matching_filename:
-        raise HTTPException(status_code=404, detail="Photo not found in registry")
-        
+
+    # Match on the record's own Drive id. Resolving via basename picked the
+    # first record with that filename, which is a different photo for the
+    # ~52% of the corpus whose basenames collide.
     matching_record = None
     for r in all_records:
-        if Path(r["path"]).name == matching_filename:
+        if resolve_one_drive_id(r["path"]) == body.drive_id:
             matching_record = r
             break
+
+    if matching_record is None:
+        raise HTTPException(status_code=404, detail="Photo not found in registry")
             
     if not matching_record or not matching_record.get("encodings"):
         raise HTTPException(status_code=400, detail="No face encodings found in this photo")

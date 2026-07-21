@@ -173,9 +173,18 @@ def get_flat_encodings():
     flat_encodings = []
     paths = []
 
+    # NOTE: is_common records are deliberately INCLUDED here.
+    #
+    # is_common is set by the preprocessor for any photo with >= 4 faces
+    # (group_photo_threshold). Skipping those meant a guest was never
+    # personally matched in any group shot — measured at 34% of photos with
+    # buffalo_l and 47% with buffalo_s. Those are precisely the photos guests
+    # most want to find themselves in, and they were only ever reachable via
+    # the undifferentiated "everyone sees these" common bucket.
+    #
+    # is_common now controls PRESENTATION only (also shown to all guests);
+    # it no longer suppresses personal matching.
     for record in all_records:
-        if record.get("is_common", False):
-            continue
         for enc in record.get("encodings", []):
             flat_encodings.append(enc)
             paths.append(record["path"])
@@ -251,7 +260,21 @@ def _find_matching_photos_db(
     """
     from app.database import supabase
 
+    from scripts.face_engine.matching import drive_record_path
+
+    def _key(row: dict) -> str:
+        """Identify a hit by Drive id when the RPC provides one.
+
+        Filenames are not unique on Drive, so keying on filename merges
+        distinct photos. If the match_faces() SQL function hasn't been updated
+        to select drive_id, this degrades to the old (ambiguous) filename key.
+        """
+        drive_id = row.get("drive_id")
+        fname = row.get("filename") or ""
+        return drive_record_path(drive_id, fname) if drive_id else fname
+
     best: dict[str, float] = {}
+    missing_drive_id = False
     for enc in guest_encodings:
         rows = supabase.rpc(
             "match_faces",
@@ -260,9 +283,18 @@ def _find_matching_photos_db(
         for row in rows.data or []:
             d = float(row["distance"])
             if d <= tolerance:
-                fname = row["filename"]
-                if fname not in best or d < best[fname]:
-                    best[fname] = d
+                if not row.get("drive_id"):
+                    missing_drive_id = True
+                key = _key(row)
+                if key not in best or d < best[key]:
+                    best[key] = d
+
+    if missing_drive_id:
+        log.warning(
+            "match_faces() returned rows without drive_id — falling back to "
+            "filename keys, which collide for ~52%% of this corpus. Update the "
+            "RPC to also select faces.drive_id."
+        )
 
     sorted_personal = sorted(best.items(), key=lambda x: x[1])
     personal_photos = [f for f, _ in sorted_personal]
@@ -270,14 +302,20 @@ def _find_matching_photos_db(
         f: compute_confidence(d, tolerance, "insightface") for f, d in sorted_personal
     }
 
+    # drive_path holds the Drive file id (see sync_encodings_to_db.sync_faces),
+    # so build the same unambiguous record path the pkl path produces.
     common_res = (
         supabase.table("photos")
-        .select("filename")
+        .select("drive_path, filename")
         .eq("is_common", True)
         .not_.is_("filename", "null")
         .execute()
     )
-    common_photos = [r["filename"] for r in common_res.data or []]
+    common_photos = [
+        drive_record_path(r["drive_path"], r["filename"]) if r.get("drive_path")
+        else r["filename"]
+        for r in common_res.data or []
+    ]
 
     return {
         "personal_photos": personal_photos,
@@ -408,25 +446,81 @@ def get_filename_map() -> dict:
     return mapping
 
 
+def resolve_one_drive_id(path: str, default: str = "") -> str:
+    """Single-path variant of resolve_drive_ids. Prefers the id embedded in the
+    record path; falls back to the (ambiguous) basename map for legacy records."""
+    from scripts.face_engine.matching import drive_id_from_path
+
+    drive_id = drive_id_from_path(path)
+    if drive_id:
+        return drive_id
+    return get_filename_map().get(Path(path).name, default)
+
+
 def resolve_drive_ids(local_paths: list[str]) -> list[str]:
+    """Map record paths to Drive file ids.
+
+    Record paths written after the drive-id fix embed the id
+    ('GoogleDrive/<id>/<name>'), so they resolve exactly. Legacy records only
+    have a basename, and basenames are not unique on Drive — over half the
+    corpus shares one with a different photo — so that path falls back to the
+    name map and is logged as ambiguous.
+    """
+    from scripts.face_engine.matching import drive_id_from_path
+
     mapping = get_filename_map()
     drive_ids = []
+    ambiguous = 0
     for path in local_paths:
+        drive_id = drive_id_from_path(path)
+        if drive_id:
+            drive_ids.append(drive_id)
+            continue
         filename = Path(path).name
         if filename in mapping:
             drive_ids.append(mapping[filename])
+            ambiguous += 1
         else:
             log.warning("No Drive ID for: %s", filename)
+    if ambiguous:
+        log.warning(
+            "%d path(s) resolved by basename (legacy pkl) — may point at the "
+            "wrong photo where filenames collide; re-preprocess to fix.",
+            ambiguous,
+        )
     return drive_ids
 
 
 def associate_guest_by_name(guest_id: str, name: str) -> int:
+    """Attach photos from any identically-named face cluster to this guest.
+
+    Matching on name is inherently ambiguous: two guests called "Ravi Singh"
+    both match a cluster named "Ravi Singh", and both would receive the other's
+    photos. Auth now keeps such guests as separate records, but this lookup
+    still can't tell them apart, so it declines to guess and logs instead —
+    those guests get photos from selfie matching rather than by name.
+    """
     guest_name = name.strip().lower()
     if not guest_name:
         return 0
 
     from app.services.drive_cache import get_cached_json
     from app.database import supabase
+
+    try:
+        escaped = name.strip().replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
+        same_name = (
+            supabase.table("guests").select("id").ilike("name", escaped).execute()
+        ).data or []
+        if len(same_name) > 1:
+            log.warning(
+                "Skipping name-association for %r — %d guests share this name, so "
+                "cluster photos cannot be attributed by name without mixing albums.",
+                name, len(same_name),
+            )
+            return 0
+    except Exception as e:
+        log.debug("Could not check for duplicate guest names: %s", e)
 
     names_data = get_cached_json("cluster_names.json")
     if not names_data:
@@ -442,17 +536,18 @@ def associate_guest_by_name(guest_id: str, name: str) -> int:
         from app.routes.faces import get_face_clusters
         clusters = get_face_clusters()
 
-        member_filenames = []
+        member_paths = []
         for cid in matching_cluster_ids:
             if cid in clusters:
-                for file_path in clusters[cid]["photos"]:
-                    member_filenames.append(Path(file_path).name)
+                member_paths.extend(clusters[cid]["photos"])
 
-        if not member_filenames:
+        if not member_paths:
             return 0
 
-        filename_map = get_filename_map()
-        drive_ids = [filename_map[fname] for fname in member_filenames if fname in filename_map]
+        # Resolve on the full record path, not the basename — over half the
+        # corpus shares a basename with a different photo, so a name lookup
+        # would associate the guest with photos they aren't in.
+        drive_ids = resolve_drive_ids(member_paths)
         if not drive_ids:
             return 0
 

@@ -47,3 +47,15 @@ backend/*.log
 # Claude Code: keep launch.json, exclude local agent worktrees & state
 .claude/worktrees/
 .claude/settings.local.json
+
+# Env backups (contain secrets - must never be committed)
+backend/.env.*
+*.env.bak*
+
+# Eval fixtures: real guests' selfies + derived encodings, not source
+eval/
+
+# Face crops + name proposals: real guests' faces and names, not source
+cluster_faces*/
+cluster_name_proposals.json
+cluster_names_by_photos.json

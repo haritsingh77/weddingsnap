@@ -28,7 +28,13 @@ class Config:
         GOOGLE_SERVICE_ACCOUNT_JSON = _service_account_path
     
     FACE_MATCH_TOLERANCE = float(os.getenv("FACE_MATCH_TOLERANCE", "0.5"))
-    ARCFACE_MATCH_TOLERANCE = float(os.getenv("ARCFACE_MATCH_THRESHOLD", "0.4"))
+    # Retrieval cut. Measured on 936 photos / 2,961 buffalo_l faces: the closest
+    # two DIFFERENT people ever came was 0.540, so 0.40 was leaving recall on the
+    # table — 0.50 yields ~53% more matches with zero false matches against
+    # same-photo pairs (which are guaranteed different identities).
+    ARCFACE_MATCH_TOLERANCE = float(os.getenv("ARCFACE_MATCH_THRESHOLD", "0.5"))
+    # Clustering stays at 0.40 — see cluster_tolerance() in face_engine/matching.
+    CLUSTER_THRESHOLD = float(os.getenv("CLUSTER_THRESHOLD", "0.4"))
     FACE_BACKEND = os.getenv("FACE_BACKEND", "auto")
     WEDDINGSNAP_SSD_ROOT = os.getenv("WEDDINGSNAP_SSD_ROOT", "")
     ENCODINGS_CACHE_PATH = os.getenv(

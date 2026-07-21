@@ -1076,10 +1076,21 @@ async def delete_photos_batch(body: DeleteBatchRequest):
             
             delete_cached_file(f"thumb_{drive_id}_400.jpg")
             
-            # 3. Filter face encodings
+            # 3. Filter face encodings — match on Drive id, never on basename.
+            # Over half the corpus shares a basename with a different photo, so
+            # filtering by name would delete unrelated photos' encodings too.
             if filename:
+                from scripts.face_engine.matching import drive_id_from_path
+
+                def _record_drive_id(item):
+                    return drive_id_from_path(item["path"]) or mapping.get(
+                        Path(item["path"]).name
+                    )
+
                 initial_enc_len = len(all_encodings)
-                all_encodings = [item for item in all_encodings if Path(item["path"]).name != filename]
+                all_encodings = [
+                    item for item in all_encodings if _record_drive_id(item) != drive_id
+                ]
                 if len(all_encodings) < initial_enc_len:
                     encodings_modified = True
                 

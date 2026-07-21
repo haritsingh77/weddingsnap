@@ -46,6 +46,7 @@ from scripts.face_engine.pipeline import (
     get_pipeline,
 )
 from scripts.face_engine.cache import MediaCache, file_content_hash, drive_file_key
+from scripts.face_engine.matching import drive_record_path
 from scripts.face_engine.metrics import RunMetrics
 from scripts.whatsapp_notifier import send_whatsapp
 
@@ -228,12 +229,13 @@ def run_drive_preprocess(
                     content_hash = file_content_hash(temp_path)
                     cache_key = drive_file_key(file_id, file_name, file_meta.get("md5Checksum"))
                     if result:
-                        result["path"] = f"GoogleDrive/{file_name}"
+                        result["path"] = drive_record_path(file_id, file_name)
+                        result["drive_id"] = file_id
                         all_results.append(result)
                         media_cache.store_result(cache_key, content_hash, result)
                         faces += result.get("face_count", 0)
                     else:
-                        media_cache.store_result(cache_key, content_hash, {"path": f"GoogleDrive/{file_name}", "skipped": True})
+                        media_cache.store_result(cache_key, content_hash, {"path": drive_record_path(file_id, file_name), "drive_id": file_id, "skipped": True})
                     log_file.write(f"{file_id}\n{file_name}\n")
                     processed_ids.add(file_id)
                     processed_ids.add(file_name)
@@ -403,7 +405,8 @@ def run_drive_preprocess(
                     if media_cache.is_unchanged(cache_key, content_hash):
                         cached = media_cache.load_result(cache_key)
                         if cached and not cached.get("skipped"):
-                            cached["path"] = f"GoogleDrive/{file_name}"
+                            cached["path"] = drive_record_path(file_id, file_name)
+                            cached["drive_id"] = file_id
                             all_results.append(cached)
                         log_file.write(f"{file_id}\n{file_name}\n")
                         processed_ids.add(file_id)
@@ -425,11 +428,12 @@ def run_drive_preprocess(
                         result = pipeline.encode_video(temp_path)
                         metrics.record_batch(1, time.time() - t0, result["face_count"] if result else 0)
                         if result:
-                            result["path"] = f"GoogleDrive/{file_name}"
+                            result["path"] = drive_record_path(file_id, file_name)
+                            result["drive_id"] = file_id
                             all_results.append(result)
                             media_cache.store_result(cache_key, content_hash, result)
                         else:
-                            media_cache.store_result(cache_key, content_hash, {"path": f"GoogleDrive/{file_name}", "skipped": True})
+                            media_cache.store_result(cache_key, content_hash, {"path": drive_record_path(file_id, file_name), "drive_id": file_id, "skipped": True})
                         log_file.write(f"{file_id}\n{file_name}\n")
                         processed_ids.add(file_id)
                         processed_ids.add(file_name)

@@ -80,24 +80,31 @@ def get_preprocessor_stats() -> str:
         except Exception:
             pass
             
-    faces_count = 0
-    if cache_path.exists():
-        try:
-            with open(cache_path, "rb") as f:
-                data = pickle.load(f)
-                faces_count = sum(r.get("face_count", 0) for r in data if isinstance(r, dict))
-        except Exception:
-            pass
-            
     running = is_preprocessor_running()
     status_str = "🟢 Running" if running else "🔴 Stopped"
-    
+
     # Try reading the real-time preprocessor_state.json if available
     state_data = None
     if state_file.exists():
         try:
             import json
             state_data = json.loads(state_file.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    # Face count comes from the state file, which the preprocessor rewrites
+    # after every file. Unpickling the .pkl here instead would read a 76 MB+
+    # file on every ping and, worse, can catch it mid-checkpoint-write and
+    # fail — reporting 0 faces. Only fall back to the pkl when there's no
+    # state file at all (i.e. no run has ever written one).
+    faces_count = 0
+    if state_data and state_data.get("faces_found") is not None:
+        faces_count = state_data["faces_found"]
+    elif cache_path.exists():
+        try:
+            with open(cache_path, "rb") as f:
+                data = pickle.load(f)
+                faces_count = sum(r.get("face_count", 0) for r in data if isinstance(r, dict))
         except Exception:
             pass
 
@@ -125,14 +132,44 @@ def get_preprocessor_stats() -> str:
             f"Local Time: {time.strftime('%Y-%m-%d %H:%M:%S')}"
         )
     
-    # Static fallback (when stopped or state file is missing/stale)
-    total_estimated_files = 12823 # default wedding drive count
-    pct = (processed_count / total_estimated_files) * 100 if total_estimated_files else 0
+    # Fallback: process not running, or its state file has gone stale.
+    # Distinguish the three cases explicitly — "stopped" alone can't tell you
+    # whether the run finished cleanly, crashed, or is wedged, which is the
+    # one thing worth knowing when it's left overnight.
+    total_files = (state_data or {}).get("total_files") or 11034
+    processed_all = (state_data or {}).get("processed_files_all_time", processed_count)
+    pct = (processed_all / total_files) * 100 if total_files else 0
+    state_status = (state_data or {}).get("status")
+    age = time.time() - (state_data or {}).get("last_update", 0) if state_data else None
+
+    if running and age is not None and age > 900:
+        # Alive but the state file is old. Either genuinely wedged, or working
+        # through a stretch that doesn't write state (the media-cache hit path
+        # `continue`s before write_state, so a long cached run looks silent).
+        # Either way the numbers below are NOT current — say so rather than
+        # presenting a stale snapshot under a green light.
+        headline = (
+            f"⚠️ *NO STATE WRITE* for {format_seconds(int(age))} — process is "
+            f"alive but figures below are stale (cache-replay or stalled)"
+        )
+    elif running and state_status == "running":
+        headline = (
+            f"⚠️ *STALLED* — process alive but no progress for "
+            f"{format_seconds(int(age))}"
+        )
+    elif not running and state_status == "running":
+        headline = "🔴 *CRASHED* — process gone but state says running"
+    elif state_status == "stopped" and processed_all >= total_files:
+        headline = "✅ *COMPLETE*"
+    else:
+        headline = f"Status: {status_str}"
+
     return (
         f"🤖 *WeddingSnap Status Update*\n\n"
-        f"Status: {status_str}\n"
-        f"Progress: *{processed_count:,} / {total_estimated_files:,}* files ({pct:.1f}%)\n"
+        f"{headline}\n"
+        f"Progress: *{processed_all:,} / {total_files:,}* files ({pct:.1f}%)\n"
         f"Faces Registered: {faces_count:,} faces\n"
+        f"Last state write: {format_seconds(int(age)) + ' ago' if age else 'never'}\n"
         f"Local Time: {time.strftime('%Y-%m-%d %H:%M:%S')}"
     )
 

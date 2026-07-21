@@ -16,6 +16,25 @@
       "cwd": "backend",
       "port": 8000,
       "autoPort": false
+    },
+    {
+      "name": "frontend-win",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--", "--port", "5180", "--strictPort"],
+      "cwd": "frontend",
+      "port": 5180,
+      "autoPort": false
+    },
+    {
+      "name": "backend-win",
+      "runtimeExecutable": "../.venv/Scripts/uvicorn.exe",
+      "runtimeArgs": ["app.main:app", "--reload", "--host", "0.0.0.0", "--port", "8000"],
+      "cwd": "backend",
+      "port": 8000,
+      "autoPort": false,
+      "env": {
+        "WEDDINGSNAP_SSD_ROOT": "D:\\weddingsnap_cache"
+      }
     }
   ]
 }
