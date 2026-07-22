@@ -6,9 +6,10 @@ import uuid
 import logging
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from app.auth_deps import guest_or_admin
 from app.database import supabase
 from app.config import settings
 
@@ -163,9 +164,94 @@ async def verify_invite(body: InviteRequest):
 
 
 @router.get("/guest/{guest_id}")
-async def get_guest(guest_id: str):
-    """Fetch guest details — used by frontend to restore session."""
-    result = supabase.table("guests").select("*").eq("id", guest_id).execute()
+async def get_guest(guest_id: str, caller: dict = Depends(guest_or_admin)):
+    """Fetch guest details — used by frontend to restore session.
+
+    Was open, and selected "*", so anyone could read any guest's row — name,
+    phone number and access token — just by knowing their id. Now it requires a
+    token, only returns your own record, and never returns the credential
+    columns.
+    """
+    if not caller.get("is_admin") and caller.get("id") != guest_id:
+        raise HTTPException(status_code=403, detail="This link cannot open that profile.")
+
+    result = (
+        supabase.table("guests")
+        .select("id, name, is_household, registered_at, last_login")
+        .eq("id", guest_id)
+        .execute()
+    )
     if not result.data:
         raise HTTPException(status_code=404, detail="Guest not found")
     return result.data[0]
+
+# ── Per-guest access links ────────────────────────────────────────────────────
+
+class LinkResponse(BaseModel):
+    valid: bool
+    guest_id: str
+    name: str
+    is_household: bool
+    event_name: str
+    members: list = []
+
+
+@router.get("/link/{token}", response_model=LinkResponse)
+async def open_link(token: str):
+    """Resolve a per-guest link.
+
+    Replaces "type the invite code and your name", which could not tell two
+    guests with the same name apart and was not a credential — the code gated
+    this screen while every other endpoint was reachable without it. The token
+    both identifies the guest and is what the API checks from here on.
+    """
+    from app.auth_deps import _lookup
+
+    guest = _lookup(token.strip())
+    if not guest:
+        # Same response for unknown and revoked, so a caller cannot probe which
+        # tokens exist.
+        raise HTTPException(
+            status_code=404,
+            detail="This link is not valid. Please check the message you were sent.",
+        )
+
+    event_name = "Wedding"
+    try:
+        ev = supabase.table("invite_codes").select("event_name").eq("active", True).limit(1).execute()
+        if ev.data:
+            event_name = ev.data[0].get("event_name") or event_name
+    except Exception:
+        pass
+
+    members = []
+    try:
+        rows = (
+            supabase.table("guest_clusters")
+            .select("cluster_id, label")
+            .eq("guest_id", guest["id"])
+            .execute()
+        ).data or []
+        members = [
+            {"cluster_id": r["cluster_id"], "label": r.get("label") or "Someone"}
+            for r in rows
+        ]
+    except Exception as e:
+        log.debug("No guest_clusters for %s: %s", guest["id"], e)
+
+    try:
+        supabase.table("guests").update(
+            {"last_login": datetime.utcnow().isoformat()}
+        ).eq("id", guest["id"]).execute()
+    except Exception:
+        pass
+
+    log.info("Link opened: %s (%s), %d member(s)", guest["name"], guest["id"], len(members))
+    return LinkResponse(
+        valid=True,
+        guest_id=guest["id"],
+        name=guest["name"],
+        is_household=bool(guest.get("is_household")),
+        event_name=event_name,
+        members=members,
+    )

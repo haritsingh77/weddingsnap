@@ -5,13 +5,23 @@ Face registration and matching routes.
 import logging
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Response
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Response
 
+from app.auth_deps import guest_or_admin, require_admin
 from app.database import supabase
 from app.services.face_service import match_guest_selfie, resolve_drive_ids
 
 log = logging.getLogger(__name__)
-router = APIRouter(prefix="/faces", tags=["faces"])
+
+# Same reasoning as photos.py: auth declared once at the router so a new route
+# is protected by default. Cluster rename/merge/delete and the People tab are
+# admin-only on top of this — the frontend used to gate those in the browser
+# from the guest's typed name, so anyone registering as "saurav" got them.
+router = APIRouter(
+    prefix="/faces",
+    tags=["faces"],
+    dependencies=[Depends(guest_or_admin)],
+)
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -430,7 +440,7 @@ class SetProfilePicRequest(BaseModel):
     drive_id: str
 
 
-@router.get("/clusters")
+@router.get("/clusters", dependencies=[Depends(require_admin)])
 def get_clusters():
     """Get list of recognized face clusters with counts, names, and thumbnail links."""
     from app.services.drive_cache import get_cached_json
@@ -526,7 +536,7 @@ def get_clusters():
     return guests_list + ui_clusters
 
 
-@router.post("/clusters/{cluster_id}/rename")
+@router.post("/clusters/{cluster_id}/rename", dependencies=[Depends(require_admin)])
 def rename_cluster(cluster_id: str, body: RenameClusterRequest):
     """Rename a face cluster — persisted to Google Drive cache."""
     if cluster_id.startswith("guest_"):
@@ -605,7 +615,7 @@ class MergeClusterRequest(BaseModel):
     source_ids: list
 
 
-@router.post("/clusters/merge")
+@router.post("/clusters/merge", dependencies=[Depends(require_admin)])
 def merge_clusters(body: MergeClusterRequest):
     """
     Merge one or more source clusters into a target cluster.
@@ -638,7 +648,7 @@ def merge_clusters(body: MergeClusterRequest):
     return {"success": True, "target_id": body.target_id, "merged_sources": new_sources}
 
 
-@router.delete("/clusters/{cluster_id}/unmerge")
+@router.delete("/clusters/{cluster_id}/unmerge", dependencies=[Depends(require_admin)])
 def unmerge_cluster(cluster_id: str):
     """
     Dissolve a cluster merge — restores source clusters as independent entries.
@@ -653,7 +663,7 @@ def unmerge_cluster(cluster_id: str):
     return {"success": True, "cluster_id": cluster_id}
 
 
-@router.get("/clusters/{cluster_id}/photos")
+@router.get("/clusters/{cluster_id}/photos", dependencies=[Depends(require_admin)])
 def get_cluster_photos(cluster_id: str):
     """Get all photos/videos featuring the person in the specified cluster or guest album."""
     if cluster_id.startswith("guest_"):
@@ -998,7 +1008,7 @@ def auto_name_cluster_for_guest(guest_name: str, selfie_bytes: bytes):
         log.warning(f"Could not auto-name face cluster: {e}")
 
 
-@router.get("/guests-list")
+@router.get("/guests-list", dependencies=[Depends(require_admin)])
 def get_guests_list():
     """Get a simple list of guest names and IDs for manual sharing dropdown."""
     try:
@@ -1009,7 +1019,7 @@ def get_guests_list():
         return []
 
 
-@router.post("/clusters/{cluster_id}/set-profile-pic")
+@router.post("/clusters/{cluster_id}/set-profile-pic", dependencies=[Depends(require_admin)])
 def set_cluster_profile_pic(cluster_id: str, body: SetProfilePicRequest):
     """Set custom profile picture for a raw cluster or guest."""
     from app.services.drive_cache import get_cached_json, save_cached_json, get_cached_file
@@ -1089,7 +1099,7 @@ def set_cluster_profile_pic(cluster_id: str, body: SetProfilePicRequest):
     return {"success": True, "representative": member}
 
 
-@router.post("/clusters/{cluster_id}/upload-profile-pic")
+@router.post("/clusters/{cluster_id}/upload-profile-pic", dependencies=[Depends(require_admin)])
 async def upload_cluster_profile_pic(cluster_id: str, file: UploadFile = File(...)):
     """Upload a custom local photo from device to set as profile picture."""
     try:

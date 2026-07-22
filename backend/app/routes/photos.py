@@ -23,8 +23,24 @@ from app.services.drive_service import (
     get_drive_service,
 )
 
+from fastapi import Depends
+
+from app.auth_deps import guest_or_admin, require_admin
+
 log = logging.getLogger(__name__)
-router = APIRouter(prefix="/photos", tags=["photos"])
+
+# Auth is applied at the ROUTER, not per endpoint. Every route here was open:
+# /all listed the whole wedding, /stream/{id} served originals, and
+# DELETE /{drive_id} was reachable by anyone. Declaring it once means a new
+# endpoint is protected by default — with 14 routes in this file, opting each
+# one in individually is a matter of time before one is missed.
+#
+# Mutations additionally depend on require_admin below.
+router = APIRouter(
+    prefix="/photos",
+    tags=["photos"],
+    dependencies=[Depends(guest_or_admin)],
+)
 
 # Track which guests have already had their named-cluster association run this
 # server session. Running it on every page load triggers Agglomerative Clustering
@@ -365,7 +381,7 @@ def get_categories():
     return result
 
 
-@router.post("/categories")
+@router.post("/categories", dependencies=[Depends(require_admin)])
 def create_category(body: CreateCategoryBody):
     """Create a new dynamic category and prepare its Google Drive subfolder."""
     from app.services.drive_cache import get_cached_json, save_cached_json
@@ -416,7 +432,7 @@ def get_category_photos(category_name: str):
     return photos
 
 
-@router.post("/categories/{category_name}/upload")
+@router.post("/categories/{category_name}/upload", dependencies=[Depends(require_admin)])
 async def upload_category_photo(
     category_name: str,
     file: UploadFile = File(...)
@@ -498,7 +514,7 @@ class SharePhotoRequest(BaseModel):
     guest_id: str
 
 
-@router.post("/share")
+@router.post("/share", dependencies=[Depends(require_admin)])
 def share_photo_with_guest(body: SharePhotoRequest):
     """Manually share/associate a photo (by drive_id) with a guest's album."""
     guest_id = body.guest_id.replace("guest_", "")
@@ -540,7 +556,7 @@ def share_photo_with_guest(body: SharePhotoRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/all")
+@router.get("/all", dependencies=[Depends(require_admin)])
 def get_all_photos(page: int = 1, limit: int = 50):
     """
     Return ALL media from the Drive (drive_filename_map.json), paginated.
@@ -646,12 +662,22 @@ def get_people_in_photo(drive_id: str):
 
 
 @router.get("/{guest_id}")
-async def get_guest_photos(guest_id: str, page: int = 1, limit: int = 50):
+async def get_guest_photos(
+    guest_id: str,
+    page: int = 1,
+    limit: int = 50,
+    caller: dict = Depends(guest_or_admin),
+):
     """
     Returns paginated list of Drive file IDs for a guest household, with video indicators.
     Includes personal matching photos for all family members and common/group photos.
     Supports nested family member metadata for custom gallery views.
     """
+    # A token unlocks its OWN album only. Guest ids are uuids so they are not
+    # guessable in practice, but "hard to guess" is not access control — without
+    # this, any valid guest token could read every other guest's album by id.
+    if not caller.get("is_admin") and caller.get("id") != guest_id:
+        raise HTTPException(status_code=403, detail="This link cannot open that album.")
     guest = supabase.table("guests").select("id, name").eq("id", guest_id).execute()
     if not guest.data:
         raise HTTPException(status_code=404, detail="Guest not found")
@@ -760,12 +786,18 @@ class NotMeBody(BaseModel):
 
 
 @router.post("/{drive_id}/not-me")
-async def guest_not_me(drive_id: str, body: NotMeBody):
+async def guest_not_me(
+    drive_id: str,
+    body: NotMeBody,
+    caller: dict = Depends(guest_or_admin),
+):
     """
     Disassociate a photo from a guest's album permanently (guest-level 'Not Me' action).
-    Does not require admin password header.
+    Guests may only do this to their own album.
     """
     guest_id = body.guest_id
+    if not caller.get("is_admin") and caller.get("id") != guest_id:
+        raise HTTPException(status_code=403, detail="This link cannot change that album.")
     try:
         # 1. Resolve database photo ID from drive_path
         photo_res = supabase.table("photos").select("id").eq("drive_path", drive_id).execute()
@@ -790,7 +822,7 @@ async def guest_not_me(drive_id: str, body: NotMeBody):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/{drive_id}")
+@router.delete("/{drive_id}", dependencies=[Depends(require_admin)])
 async def delete_photo(drive_id: str):
     """
     Delete a photo/video:
@@ -998,7 +1030,7 @@ def download_batch(body: DownloadBatchRequest):
     )
 
 
-@router.post("/delete-batch")
+@router.post("/delete-batch", dependencies=[Depends(require_admin)])
 async def delete_photos_batch(body: DeleteBatchRequest):
     """
     Delete multiple photos/videos in batch:
@@ -1154,4 +1186,4 @@ async def delete_photos_batch(body: DeleteBatchRequest):
 
     return {"success": True, "deleted_count": success_count, "errors": errors}
 
-
+
