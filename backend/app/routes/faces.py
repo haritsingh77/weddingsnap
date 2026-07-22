@@ -74,24 +74,19 @@ async def register_face(
         personal_ids = resolve_drive_ids(match_result["personal_photos"])
         common_ids = resolve_drive_ids(match_result["common_photos"])
 
-        # ── Deduplicate before upsert ─────────────────────────────────────────
-        unique_photos: dict[str, dict] = {}
-        for drive_id in personal_ids:
-            if drive_id:
-                unique_photos[drive_id] = {
-                    "drive_path": drive_id,
-                    "is_common": False,
-                    "face_count": 1,
-                }
-        for drive_id in common_ids:
-            if drive_id:
-                unique_photos[drive_id] = {
-                    "drive_path": drive_id,
-                    "is_common": True,
-                    "face_count": 4,
-                }
-
-        photos_to_upsert = list(unique_photos.values())
+        # Photos are created by sync_encodings_to_db.py, which knows each one's
+        # real face_count and is_common. Registering a guest must therefore only
+        # LOOK UP ids, never write these columns.
+        #
+        # It used to upsert them with hardcoded values (face_count 1 for
+        # personal, 4 for common), overwriting the synced truth on every
+        # registration: 2,451 photos had face_count forced to 4, and 6 group
+        # photos had is_common flipped off — which removes them from every OTHER
+        # guest's gallery, since get_guest_photos shows a photo only when it is
+        # common or personally matched. Each registration degraded the data a
+        # little more for everyone else.
+        wanted = [d for d in dict.fromkeys(list(personal_ids) + list(common_ids)) if d]
+        photos_to_upsert = wanted
         log.info(
             f"Guest {guest_id}: {len(personal_ids)} personal + "
             f"{len(common_ids)} common → {len(photos_to_upsert)} unique photos to upsert"
@@ -99,14 +94,44 @@ async def register_face(
 
         photo_rows: list[dict] = []
         if photos_to_upsert:
-            upserted = (
-                supabase.table("photos")
-                .upsert(photos_to_upsert, on_conflict="drive_path")
-                .execute()
-            )
+            # Read the ids in chunks — a URL-length limit applies to .in_(), and
+            # a matched guest can easily reference several thousand photos.
+            drive_to_id: dict[str, int] = {}
+            CHUNK = 200
+            for i in range(0, len(photos_to_upsert), CHUNK):
+                part = photos_to_upsert[i : i + CHUNK]
+                rows = (
+                    supabase.table("photos")
+                    .select("id, drive_path")
+                    .in_("drive_path", part)
+                    .execute()
+                ).data or []
+                drive_to_id.update({r["drive_path"]: r["id"] for r in rows})
 
-            if upserted.data:
-                drive_to_id = {p["drive_path"]: p["id"] for p in upserted.data}
+            missing = [d for d in photos_to_upsert if d not in drive_to_id]
+            if missing:
+                # Only reachable if a photo was matched but never synced. Insert
+                # a minimal row so the guest still sees it, and say so — it means
+                # the encodings and the photos table have drifted apart.
+                log.warning(
+                    "%d matched photo(s) absent from the photos table — inserting "
+                    "placeholders; re-run sync_encodings_to_db.py", len(missing)
+                )
+                for i in range(0, len(missing), 500):
+                    supabase.table("photos").upsert(
+                        [{"drive_path": d} for d in missing[i : i + 500]],
+                        on_conflict="drive_path",
+                    ).execute()
+                for i in range(0, len(missing), CHUNK):
+                    rows = (
+                        supabase.table("photos")
+                        .select("id, drive_path")
+                        .in_("drive_path", missing[i : i + CHUNK])
+                        .execute()
+                    ).data or []
+                    drive_to_id.update({r["drive_path"]: r["id"] for r in rows})
+
+            if drive_to_id:
 
                 from app.services.face_state import get_disassociated_photo_ids
                 disassociated_set = get_disassociated_photo_ids(guest_id)
