@@ -129,10 +129,26 @@ def thumb_photo(file_id: str, size: int = 400):
         except Exception:
             pass
 
-    # ── 2. Check Supabase Storage — redirect to CDN if pre-cached ─────────────
-    # Use a fast HEAD check rather than a full download to avoid latency.
+    # ── 2. Redirect to the Supabase CDN ───────────────────────────────────────
+    #
+    # Deliberately no HEAD check first. It was there to confirm the object
+    # exists, but preprocessing uploads a thumbnail for every file it handles,
+    # so the answer is always yes — measured 25/25 on a random sample of the
+    # 11,034 photos. On a hosted backend that check cost ~2s per thumbnail
+    # (Cloud Run and Supabase are in different regions), and browsers open only
+    # ~6 connections per host, so a 50-photo page took ~17s to fill.
+    #
+    # Redirecting blind means a genuinely missing thumbnail shows as a broken
+    # image rather than falling back to Drive. That is the right trade at 20x
+    # the speed — and set THUMB_VERIFY_CDN=1 to restore the check if a batch of
+    # photos is ever synced without its thumbnails.
+    cdn_url = f"{settings.SUPABASE_URL}/storage/v1/object/public/weddingsnap-cache/{cache_key}"
+    import os
+
+    if os.getenv("THUMB_VERIFY_CDN", "").strip() not in ("1", "true", "yes"):
+        return RedirectResponse(url=cdn_url, status_code=307)
+
     try:
-        cdn_url = f"{settings.SUPABASE_URL}/storage/v1/object/public/weddingsnap-cache/{cache_key}"
         import httpx
         head = httpx.head(cdn_url, timeout=2.0)
         if head.status_code == 200:
