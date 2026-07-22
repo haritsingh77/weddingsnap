@@ -1,15 +1,7 @@
 fastapi==0.111.0
 uvicorn[standard]==0.29.0
 python-multipart==0.0.9
-face_recognition==1.3.0
-# ArcFace selfie encoding at match time (CPU is fine for one selfie).
-# Must match the backend used for gallery encodings (buffalo_l preprocess).
-insightface==0.7.3
-onnxruntime==1.17.3
-numpy==1.26.4
-scikit-learn==1.4.2
 Pillow==10.3.0
-opencv-python-headless==4.9.0.80
 google-api-python-client==2.127.0
 google-auth-httplib2==0.2.0
 google-auth-oauthlib==1.2.0
@@ -18,4 +10,25 @@ python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 python-dotenv==1.0.1
 httpx==0.27.0
-tqdm==4.66.4
+
+# Small, and imported at module level in a few places. ~30 MB, versus ~1.8 GB
+# resident for the ONNX stack it used to sit alongside.
+numpy==1.26.4
+
+# ── Deliberately NOT here ────────────────────────────────────────────────────
+#
+#   face_recognition / dlib      compiled from source in the Dockerfile, and
+#                                unused since the move to InsightFace
+#   insightface, onnxruntime     ~1.8 GB resident once the model loads
+#   scikit-learn                 only the DBSCAN fallback for clustering
+#   opencv-python-headless       only used by the video frame sampler
+#
+# The server no longer recognises faces. Clustering happens once during
+# preprocessing on the machine with the GPU, and the answer is stored in
+# faces.cluster_id — so the API reads a table rather than re-deriving it, and
+# guests identify themselves with a per-guest link rather than a selfie.
+#
+# This is what makes the image small enough for a free host, and it is why the
+# API cannot enrol a new face. To add someone: preprocess locally, name their
+# cluster, sync, and send them a link. Install requirements-preprocess.txt for
+# that side of the work.

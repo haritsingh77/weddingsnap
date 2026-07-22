@@ -114,8 +114,20 @@ def encode_selfie(image_bytes: bytes) -> Optional[np.ndarray]:
         img_array = np.array(img)
 
         if backend == "insightface":
-            from scripts.face_engine.pipeline import get_pipeline
-            from scripts.face_engine.config import PreprocessConfig
+            try:
+                from scripts.face_engine.pipeline import get_pipeline
+                from scripts.face_engine.config import PreprocessConfig
+            except ImportError as e:
+                # Expected on the deployed server: InsightFace, ONNX and the
+                # encodings are ~1.8 GB resident and only needed to enrol a NEW
+                # face. Guests use per-guest links instead, so recognition runs
+                # on the machine with the GPU and the result is synced to the
+                # database. Fail clearly rather than with a bare ImportError.
+                log.warning("Face recognition unavailable in this deployment: %s", e)
+                raise RuntimeError(
+                    "Face recognition is not installed on this server. Run the "
+                    "preprocessing locally and sync the result instead."
+                ) from e
             pipeline = get_pipeline(PreprocessConfig())
             detections = pipeline.backend.detect_and_encode(img_array)
             if not detections:

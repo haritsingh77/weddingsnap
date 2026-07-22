@@ -5,11 +5,17 @@ Face registration and matching routes.
 import logging
 from datetime import datetime
 
+import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Response
 
 from app.auth_deps import guest_or_admin, require_admin
 from app.database import supabase
-from app.services.face_service import match_guest_selfie, resolve_drive_ids
+from app.services.face_service import (
+    get_filename_map,
+    load_encodings,
+    resolve_drive_ids,
+    resolve_one_drive_id,
+)
 
 log = logging.getLogger(__name__)
 
@@ -27,207 +33,25 @@ router = APIRouter(
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 
-@router.post("/register")
-async def register_face(
-    guest_id: str = Form(...),
-    selfie: UploadFile = File(...),
-    selfie2: UploadFile = File(None),
-    selfie3: UploadFile = File(None),
-    selfie4: UploadFile = File(None),
-    selfie5: UploadFile = File(None),
-):
+@router.post("/register", deprecated=True)
+async def register_face():
+    """Gone: guests no longer scan their face.
+
+    Identity now comes from a per-guest link, because the clustering already
+    knows who is in which photo and a human named the clusters. That is more
+    accurate than matching a selfie and removes the whole class of "we couldn't
+    detect a face" failures.
+
+    Recognition itself is not gone, it just runs where the GPU is. To add
+    somebody new: preprocess locally, name their cluster, and give them a link.
+    Keeping it off the server is what lets the deployed image drop InsightFace,
+    ONNX and the 52 MB encodings file — about 1.8 GB of resident memory, and the
+    difference between fitting a free host and not.
     """
-    Step 2 of guest flow.
-    Guest uploads 1–5 selfies (different angles) → system finds all their photos.
-    More angles = better accuracy.
-    """
-    try:
-        # Validate guest exists
-        guest = supabase.table("guests").select("*").eq("id", guest_id).execute()
-        if not guest.data:
-            raise HTTPException(status_code=404, detail="Guest not found")
-
-        # Read primary selfie bytes
-        image_bytes = await selfie.read()
-        if len(image_bytes) > 10 * 1024 * 1024:  # 10MB limit
-            raise HTTPException(status_code=400, detail="Selfie too large. Max 10MB.")
-
-        # Read extra angle selfies
-        extra_selfie_bytes = []
-        for extra_upload in [selfie2, selfie3, selfie4, selfie5]:
-            if extra_upload is not None:
-                extra_bytes = await extra_upload.read()
-                if len(extra_bytes) > 0:
-                    extra_selfie_bytes.append(extra_bytes)
-
-        log.info(
-            f"Guest {guest_id}: received {1 + len(extra_selfie_bytes)} selfie angle(s)"
-        )
-
-        # Save primary selfie as reference (used in Recognized Faces panel)
-        from app.services.drive_cache import save_cached_file
-        save_cached_file(f"selfie_{guest_id}.jpg", image_bytes)
-
-        # Run face matching with all angles
-        match_result = match_guest_selfie(
-            image_bytes,
-            extra_selfie_bytes=extra_selfie_bytes if extra_selfie_bytes else None
-        )
-
-        if not match_result["success"]:
-            raise HTTPException(status_code=422, detail=match_result["message"])
-
-        # Auto-name corresponding cluster in Recognized Faces panel
-        auto_name_cluster_for_guest(guest.data[0]["name"], image_bytes)
-
-        # Resolve local file paths → Drive file IDs
-        personal_ids = resolve_drive_ids(match_result["personal_photos"])
-        common_ids = resolve_drive_ids(match_result["common_photos"])
-
-        # Photos are created by sync_encodings_to_db.py, which knows each one's
-        # real face_count and is_common. Registering a guest must therefore only
-        # LOOK UP ids, never write these columns.
-        #
-        # It used to upsert them with hardcoded values (face_count 1 for
-        # personal, 4 for common), overwriting the synced truth on every
-        # registration: 2,451 photos had face_count forced to 4, and 6 group
-        # photos had is_common flipped off — which removes them from every OTHER
-        # guest's gallery, since get_guest_photos shows a photo only when it is
-        # common or personally matched. Each registration degraded the data a
-        # little more for everyone else.
-        wanted = [d for d in dict.fromkeys(list(personal_ids) + list(common_ids)) if d]
-        photos_to_upsert = wanted
-        log.info(
-            f"Guest {guest_id}: {len(personal_ids)} personal + "
-            f"{len(common_ids)} common → {len(photos_to_upsert)} unique photos to upsert"
-        )
-
-        photo_rows: list[dict] = []
-        if photos_to_upsert:
-            # Read the ids in chunks — a URL-length limit applies to .in_(), and
-            # a matched guest can easily reference several thousand photos.
-            drive_to_id: dict[str, int] = {}
-            CHUNK = 200
-            for i in range(0, len(photos_to_upsert), CHUNK):
-                part = photos_to_upsert[i : i + CHUNK]
-                rows = (
-                    supabase.table("photos")
-                    .select("id, drive_path")
-                    .in_("drive_path", part)
-                    .execute()
-                ).data or []
-                drive_to_id.update({r["drive_path"]: r["id"] for r in rows})
-
-            missing = [d for d in photos_to_upsert if d not in drive_to_id]
-            if missing:
-                # Only reachable if a photo was matched but never synced. Insert
-                # a minimal row so the guest still sees it, and say so — it means
-                # the encodings and the photos table have drifted apart.
-                log.warning(
-                    "%d matched photo(s) absent from the photos table — inserting "
-                    "placeholders; re-run sync_encodings_to_db.py", len(missing)
-                )
-                for i in range(0, len(missing), 500):
-                    supabase.table("photos").upsert(
-                        [{"drive_path": d} for d in missing[i : i + 500]],
-                        on_conflict="drive_path",
-                    ).execute()
-                for i in range(0, len(missing), CHUNK):
-                    rows = (
-                        supabase.table("photos")
-                        .select("id, drive_path")
-                        .in_("drive_path", missing[i : i + CHUNK])
-                        .execute()
-                    ).data or []
-                    drive_to_id.update({r["drive_path"]: r["id"] for r in rows})
-
-            if drive_to_id:
-
-                from app.services.face_state import get_disassociated_photo_ids
-                disassociated_set = get_disassociated_photo_ids(guest_id)
-
-                # Build guest_photos mapping rows — use a set to deduplicate
-                seen_photo_ids: set[str] = set()
-                for drive_id in list(personal_ids) + list(common_ids):
-                    pid = drive_to_id.get(drive_id)
-                    if pid and pid not in seen_photo_ids and pid not in disassociated_set:
-                        seen_photo_ids.add(pid)
-                        photo_rows.append({"guest_id": guest_id, "photo_id": pid})
-
-                if photo_rows:
-                    supabase.table("guest_photos").upsert(
-                        photo_rows, on_conflict="guest_id,photo_id"
-                    ).execute()
-
-        # Update guest last_login
-        supabase.table("guests").update(
-            {
-                "last_login": datetime.utcnow().isoformat(),
-            }
-        ).eq("id", guest_id).execute()
-
-        # Confidence summary
-        confidence_map = match_result.get("confidence_map", {})
-        confidences = list(confidence_map.values())
-        avg_confidence = round(sum(confidences) / len(confidences), 1) if confidences else 0
-        high_conf_count = sum(1 for c in confidences if c >= 70)
-
-        log.info(
-            f"Guest {guest_id} matched: "
-            f"{len(personal_ids)} personal + {len(common_ids)} common photos | "
-            f"Avg confidence: {avg_confidence}% | "
-            f"Angles used: {match_result.get('selfie_angles_used', 1)}"
-        )
-
-        return {
-            "success": True,
-            "personal_count": len(personal_ids),
-            "common_count": len(common_ids),
-            "total": len(personal_ids) + len(common_ids),
-            "angles_used": match_result.get("selfie_angles_used", 1),
-            "avg_confidence": avg_confidence,
-            "high_confidence_matches": high_conf_count,
-            "message": (
-                f"Found {len(personal_ids)} photos of you and {len(common_ids)} group photos! "
-                f"Average match confidence: {avg_confidence}%"
-            ),
-        }
-
-    except Exception as e:
-        import traceback
-
-        tb = traceback.format_exc()
-        log.error(f"Error in register_face:\n{tb}")
-        try:
-            with open("register_error.log", "w") as f:
-                f.write(tb)
-        except Exception:
-            pass
-        if isinstance(e, HTTPException):
-            raise e
-        raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
-
-
-# ── Face Clustering & Recognized Faces (Google Photos style) ─────────────────
-
-import io
-from pathlib import Path
-import cv2
-import numpy as np
-from PIL import Image, ImageOps
-from sklearn.cluster import AgglomerativeClustering
-from fastapi import Response
-from googleapiclient.http import MediaIoBaseDownload
-
-from app.services.face_service import load_encodings, get_filename_map, resolve_one_drive_id
-from app.services.drive_service import get_drive_service, download_file_to_memory, download_file_from_drive
-from app.config import settings
-
-CACHE_THUMB_DIR = Path("cache/thumbnails")
-
-
-_cached_clusters = None
-_cached_clusters_key = None
+    raise HTTPException(
+        status_code=410,
+        detail="Face scanning has been replaced by a personal link. Please use the link you were sent.",
+    )
 
 
 def _cluster_faces_scalable(X: np.ndarray, threshold: float, backend: str) -> np.ndarray:
@@ -315,7 +139,97 @@ def _cluster_faces_scalable(X: np.ndarray, threshold: float, backend: str) -> np
     return db.fit_predict(X_f)
 
 
+_VIDEO_EXTS = (".mp4", ".mov", ".avi", ".mkv", ".webm")
+_db_clusters_cache: dict | None = None
+
+
+def _clusters_from_db() -> dict | None:
+    """Build the cluster map from the faces table.
+
+    sync_encodings_to_db.py already clustered everything and stored the answer
+    in faces.cluster_id. Re-deriving it here meant downloading the 52 MB pkl and
+    re-clustering 27,377 faces on every cold request — about 11 seconds, and the
+    reason the People tab felt slow. It also forced numpy, faiss and
+    scikit-learn into the deployed image for work that was already done.
+
+    Returns None when the table is empty, so a machine with only a pkl (i.e. the
+    preprocessing box) still falls through to the in-memory path below.
+    """
+    global _db_clusters_cache
+    if _db_clusters_cache is not None:
+        return _db_clusters_cache
+
+    from scripts.face_engine.matching import drive_record_path
+
+    rows, offset = [], 0
+    while True:
+        page = (
+            supabase.table("faces")
+            .select("filename, drive_id, bbox, frame_idx, cluster_id")
+            .not_.is_("cluster_id", "null")
+            .range(offset, offset + 999)
+            .execute()
+        ).data or []
+        rows.extend(page)
+        if len(page) < 1000:
+            break
+        offset += 1000
+
+    if not rows:
+        return None
+
+    # clusters.name is the source of truth now. cluster_names.json is keyed by
+    # the pkl's positional labels, which have nothing to do with these ids —
+    # looking names up there produced "Person #N" for all 69 named people.
+    names: dict[str, str] = {}
+    try:
+        for c in (supabase.table("clusters").select("id, name").execute()).data or []:
+            if c.get("name"):
+                names[str(c["id"])] = c["name"]
+    except Exception as e:
+        log.warning("Could not read cluster names: %s", e)
+
+    clusters: dict = {}
+    for r in rows:
+        cid = str(r["cluster_id"])
+        name = r.get("filename") or ""
+        path = drive_record_path(r["drive_id"], name) if r.get("drive_id") else name
+        member = {
+            "path": path,
+            "location": tuple(r["bbox"]) if r.get("bbox") else None,
+            "frame_idx": r.get("frame_idx"),
+            "is_video": name.lower().endswith(_VIDEO_EXTS),
+        }
+        entry = clusters.setdefault(cid, {"members": [], "photos": set()})
+        entry["members"].append(member)
+        entry["photos"].add(path)
+
+    result = {}
+    for cid, data in clusters.items():
+        # Prefer a still for the thumbnail — a video frame is usually motion-blurred
+        rep = next((m for m in data["members"] if not m["is_video"]), data["members"][0])
+        result[cid] = {
+            "representative": rep,
+            "photos": sorted(data["photos"]),
+            "count": len(data["photos"]),
+            "members": data["members"],
+            "db_name": names.get(cid),
+        }
+
+    result = dict(sorted(result.items(), key=lambda kv: kv[1]["count"], reverse=True))
+    log.info("Clusters from DB: %d people, %d faces", len(result), len(rows))
+    _db_clusters_cache = result
+    return result
+
+
 def get_face_clusters() -> dict:
+    db = _clusters_from_db()
+    if db is not None:
+        return db
+    return _get_face_clusters_from_pkl()
+
+
+def _get_face_clusters_from_pkl() -> dict:
     """
     Cluster all precomputed face encodings in face_encodings.pkl.
     Uses FAISS-based nearest-neighbour graph + Union-Find — O(n*k) memory,
@@ -454,12 +368,23 @@ def get_clusters():
         guests_res = supabase.table("guests").select("*").order("name").execute()
         guests = guests_res.data or []
         
-        # Get count of matched photos per guest
-        gp_res = supabase.table("guest_photos").select("guest_id").execute()
-        counts = {}
-        for row in gp_res.data:
-            gid = row["guest_id"]
-            counts[gid] = counts.get(gid, 0) + 1
+        # Paged: PostgREST caps a single select at 1000 rows and does so
+        # silently. With 23,813 guest_photos rows that counted only the first
+        # 1000, so nearly every guest showed 0 photos in the People tab.
+        counts: dict[str, int] = {}
+        offset = 0
+        while True:
+            page = (
+                supabase.table("guest_photos")
+                .select("guest_id")
+                .range(offset, offset + 999)
+                .execute()
+            ).data or []
+            for row in page:
+                counts[row["guest_id"]] = counts.get(row["guest_id"], 0) + 1
+            if len(page) < 1000:
+                break
+            offset += 1000
 
         for guest in guests:
             guest_id = guest["id"]
@@ -509,7 +434,11 @@ def get_clusters():
         loc = rep["location"]
         rep_key = f"{drive_id}_{loc[0]}_{loc[1]}_{loc[2]}_{loc[3]}"
 
-        name = names_data.get(rep_key) or names_data.get(cid, f"Person #{cid}")
+        name = (
+            cdata.get("db_name")
+            or names_data.get(rep_key)
+            or names_data.get(cid, f"Person #{cid}")
+        )
 
         # Skip this cluster if it's already named after a registered guest
         if name.strip().lower() in registered_names:
@@ -670,12 +599,39 @@ def get_cluster_photos(cluster_id: str):
         guest_id = cluster_id.replace("guest_", "")
         
         # Fetch guest personal photos
-        gp_res = supabase.table("guest_photos").select("photo_id").eq("guest_id", guest_id).execute()
-        if not gp_res.data:
+        # Paged for the same reason as above — a guest with more than 1000
+        # photos would silently see only the first 1000 of them.
+        photo_ids, offset = [], 0
+        while True:
+            page = (
+                supabase.table("guest_photos")
+                .select("photo_id")
+                .eq("guest_id", guest_id)
+                .range(offset, offset + 999)
+                .execute()
+            ).data or []
+            photo_ids.extend(r["photo_id"] for r in page)
+            if len(page) < 1000:
+                break
+            offset += 1000
+        if not photo_ids:
             return []
 
-        photo_ids = [row["photo_id"] for row in gp_res.data]
-        res = supabase.table("photos").select("id, drive_path, is_common, face_count").in_("id", photo_ids).execute()
+        rows = []
+        for i in range(0, len(photo_ids), 200):
+            rows.extend(
+                (
+                    supabase.table("photos")
+                    .select("id, drive_path, is_common, face_count")
+                    .in_("id", photo_ids[i : i + 200])
+                    .execute()
+                ).data or []
+            )
+
+        class _R:
+            pass
+        res = _R()
+        res.data = rows
 
         from app.routes.photos import get_drive_id_to_mime_map
         mime_map = get_drive_id_to_mime_map()
