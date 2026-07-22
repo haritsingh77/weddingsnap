@@ -123,10 +123,16 @@ def main() -> None:
     ap.add_argument("--candidates", type=int, default=3)
     ap.add_argument("--save", action="store_true", help="write the name->photos mapping")
     ap.add_argument("--apply-db", action="store_true", help="push saved names into clusters table")
+    ap.add_argument("--apply-json", action="store_true",
+                    help="write cluster_names.json, which is what the People tab reads")
     args = ap.parse_args()
 
     if args.apply_db:
         apply_db()
+        return
+
+    if args.apply_json:
+        apply_json()
         return
 
     crop_dirs = [Path(c) for c in args.crops]
@@ -250,6 +256,75 @@ def find_near_duplicates(names: list[str]) -> list[tuple[str, str]]:
             elif abs(len(na) - len(nb)) <= 2 and (na.startswith(nb) or nb.startswith(na)):
                 out.append((a, b))
     return out
+
+
+def apply_json() -> None:
+    """Write cluster_names.json — the file the People tab actually reads.
+
+    apply_db() puts names in clusters.name, but nothing in the backend reads
+    that column: /faces/clusters builds its list by clustering the pkl in memory
+    and looking names up in cluster_names.json. So names applied to the DB alone
+    are invisible in the UI.
+
+    Clustering is done by importing the backend's own get_face_clusters() rather
+    than re-implementing it, so the cluster ids written here are exactly the ids
+    the endpoint will produce. Names are keyed by BOTH the positional id and the
+    representative-face key, because the endpoint tries rep_key first and that
+    one survives re-clustering.
+    """
+    import os
+    import sys as _sys
+    from collections import Counter
+
+    from dotenv import load_dotenv
+
+    if not NAMES_FILE.exists():
+        _sys.exit(f"{NAMES_FILE.name} not found — run with --save first.")
+    saved = json.loads(NAMES_FILE.read_text(encoding="utf-8"))
+    saved.pop("__ignored_clusters__", None)
+
+    load_dotenv(project_root / "backend" / ".env")
+    _sys.path.insert(0, str(project_root / "backend"))
+    from app.routes.faces import get_face_clusters
+    from app.services.face_service import resolve_one_drive_id
+
+    print("Clustering via the backend's own code path...")
+    clusters = get_face_clusters()
+    print(f"  {len(clusters):,} clusters")
+
+    want = {n: set(v["photos"]) for n, v in saved.items()}
+    names_out: dict[str, str] = {}
+    used: set[str] = set()
+    applied = skipped = 0
+
+    for name, photos in sorted(want.items(), key=lambda kv: -len(kv[1])):
+        best, best_n = None, 0
+        for cid, cdata in clusters.items():
+            if cid in used:
+                continue
+            mine = {Path(p).name for p in cdata.get("photos", [])}
+            n = len(photos & mine)
+            if n > best_n:
+                best, best_n = cid, n
+        if best is None or best_n < max(2, len(photos) // 4):
+            print(f"  ! {name}: no confident cluster (best overlap {best_n}) — skipped")
+            skipped += 1
+            continue
+        used.add(best)
+        shown = saved[name].get("display_name") or display_name(name)
+        names_out[best] = shown
+        rep = clusters[best].get("representative") or {}
+        if rep.get("path") and rep.get("location"):
+            did = resolve_one_drive_id(rep["path"])
+            loc = rep["location"]
+            names_out[f"{did}_{loc[0]}_{loc[1]}_{loc[2]}_{loc[3]}"] = shown
+        applied += 1
+        print(f'  {name:<26} -> cluster {best} as "{shown}" ({best_n}/{len(photos)})')
+
+    from app.services.drive_cache import save_cached_json
+    save_cached_json("cluster_names.json", names_out)
+    print(f"\nWrote cluster_names.json: {applied} name(s), {skipped} skipped")
+    print(f"  ({len(names_out)} keys — positional id + representative-face key each)")
 
 
 def apply_db() -> None:

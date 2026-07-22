@@ -304,17 +304,29 @@ def _find_matching_photos_db(
 
     # drive_path holds the Drive file id (see sync_encodings_to_db.sync_faces),
     # so build the same unambiguous record path the pkl path produces.
-    common_res = (
-        supabase.table("photos")
-        .select("drive_path, filename")
-        .eq("is_common", True)
-        .not_.is_("filename", "null")
-        .execute()
-    )
+    #
+    # Paged deliberately: PostgREST caps a single select at 1000 rows and does
+    # so silently, which capped the group photos every guest saw at exactly
+    # 1000 out of 3,682 — about two thirds of them simply missing, with no error.
+    common_rows, offset = [], 0
+    while True:
+        page = (
+            supabase.table("photos")
+            .select("drive_path, filename")
+            .eq("is_common", True)
+            .not_.is_("filename", "null")
+            .range(offset, offset + 999)
+            .execute()
+        ).data or []
+        common_rows.extend(page)
+        if len(page) < 1000:
+            break
+        offset += 1000
+
     common_photos = [
         drive_record_path(r["drive_path"], r["filename"]) if r.get("drive_path")
         else r["filename"]
-        for r in common_res.data or []
+        for r in common_rows
     ]
 
     return {
