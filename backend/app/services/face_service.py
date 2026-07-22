@@ -97,8 +97,19 @@ def encode_selfie(image_bytes: bytes) -> Optional[np.ndarray]:
         img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         img = ImageOps.exif_transpose(img)
         w, h = img.size
-        if max(w, h) > 1000:
-            scale = 1000 / max(w, h)
+        # Match the size the gallery was detected at. Shrinking to 1000 first
+        # found only 5 of 12 sampled faces; at 2048 all 12 were found, median
+        # detection score 0.838 — so most "we couldn't detect a face" rejections
+        # were pixels being thrown away, not bad photos, and no threshold change
+        # would have fixed them.
+        #
+        # Matching the preprocessing size also keeps enrolment and gallery
+        # detection consistent, so a selfie is measured the same way as the
+        # photos it will be compared against.
+        import os
+        max_dim = int(os.getenv("SELFIE_MAX_DIMENSION", "2048"))
+        if max(w, h) > max_dim:
+            scale = max_dim / max(w, h)
             img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
         img_array = np.array(img)
 
@@ -116,9 +127,18 @@ def encode_selfie(image_bytes: bytes) -> Optional[np.ndarray]:
             # Stricter quality gate for enrollment: a weak reference selfie
             # degrades every subsequent match. Require a confident, reasonably
             # sized face. (Gallery detection uses a looser 0.65 gate.)
+            # Calibrated against real photos rather than picked by feel. At 0.72
+            # / 110px the gate rejected a 0.891-confidence face for being 3px
+            # short, and a large 280x403 face for 0.017 of score — 6 of 12
+            # sampled photos, none of them actually bad.
+            #
+            # 80px is the meaningful floor: ArcFace normalises every face to
+            # 112x112, so ~110px is already native resolution and 80px is only a
+            # mild upscale. Below that there genuinely isn't enough detail for a
+            # reference selfie, which is what this gate is for.
             import os
-            min_score = float(os.getenv("SELFIE_MIN_DET_SCORE", "0.72"))
-            min_px = int(os.getenv("SELFIE_MIN_FACE_PX", "110"))
+            min_score = float(os.getenv("SELFIE_MIN_DET_SCORE", "0.65"))
+            min_px = int(os.getenv("SELFIE_MIN_FACE_PX", "80"))
             face_w = largest.bbox[2] - largest.bbox[0]
             face_h = largest.bbox[3] - largest.bbox[1]
             if largest.det_score < min_score or min(face_w, face_h) < min_px:
@@ -260,6 +280,8 @@ def _find_matching_photos_db(
     """
     from app.database import supabase
 
+    from collections import Counter
+
     from scripts.face_engine.matching import drive_record_path
 
     def _key(row: dict) -> str:
@@ -274,6 +296,8 @@ def _find_matching_photos_db(
         return drive_record_path(drive_id, fname) if drive_id else fname
 
     best: dict[str, float] = {}
+    # cluster of each MATCHED face, straight from the RPC — see _expand_via_clusters
+    cluster_hits: Counter = Counter()
     missing_drive_id = False
     for enc in guest_encodings:
         rows = supabase.rpc(
@@ -288,6 +312,8 @@ def _find_matching_photos_db(
                 key = _key(row)
                 if key not in best or d < best[key]:
                     best[key] = d
+                if row.get("cluster_id") is not None:
+                    cluster_hits[row["cluster_id"]] += 1
 
     if missing_drive_id:
         log.warning(
@@ -295,6 +321,8 @@ def _find_matching_photos_db(
             "filename keys, which collide for ~52%% of this corpus. Update the "
             "RPC to also select faces.drive_id."
         )
+
+    best = _expand_via_clusters(supabase, best, tolerance, cluster_hits)
 
     sorted_personal = sorted(best.items(), key=lambda x: x[1])
     personal_photos = [f for f, _ in sorted_personal]
@@ -434,7 +462,15 @@ def match_guest_selfie(
         return {
             "success": False,
             "error": "no_face_detected",
-            "message": "We couldn't detect a face in your photo. Please try again in good lighting.",
+            # Says what to change rather than blaming the light. The gate also
+            # fires on a face that WAS found but is small or low-confidence, and
+            # "try better lighting" sends someone to re-shoot a photo that was
+            # fine — the actual fix is usually to get closer or crop in.
+            "message": (
+                "We couldn't get a clear enough face from that photo. "
+                "Try one where your face is larger and looking towards the "
+                "camera — a close-up selfie works best."
+            ),
         }
 
     results = find_matching_photos(guest_encodings, tolerance=tolerance)
@@ -456,6 +492,72 @@ def get_filename_map() -> dict:
     mapping = build_filename_to_id_map()
     log.info("Mapped %s files", f"{len(mapping):,}")
     return mapping
+
+
+def _expand_via_clusters(supabase, best: dict[str, float], tolerance: float,
+                         cluster_hits: "Counter | None" = None) -> dict[str, float]:
+    """Add the rest of a cluster once the selfie clearly belongs to it.
+
+    A selfie is one photo, so direct matching only finds faces within `tolerance`
+    of that single shot. Clustering is transitive — A~B and B~C puts all three
+    together — so a person's cluster legitimately spans angles and lighting no
+    single selfie is close to. Measured: a selfie matched 395 photos while that
+    person's cluster held 1,654.
+
+    So: when enough matched faces land in one cluster, take the whole cluster.
+    The support threshold matters because clusters can be impure — requiring a
+    real number of independent hits, not one lucky face, keeps a stray match
+    from dragging in a stranger's entire album.
+    """
+    import os
+
+    from scripts.face_engine.matching import drive_record_path
+
+    min_hits = int(os.getenv("CLUSTER_EXPAND_MIN_HITS", "5"))
+    if not best or min_hits <= 0 or not cluster_hits:
+        return best
+
+    try:
+        # Only clusters the MATCHED faces belong to. Counting by photo instead
+        # would credit every face in the frame, so anyone standing next to the
+        # guest would have their whole cluster pulled in (395 -> 7,972 photos).
+        strong = [c for c, n in cluster_hits.items() if n >= min_hits]
+        if not strong:
+            return best
+
+        added = 0
+        for cid in strong:
+            rows, offset = [], 0
+            while True:
+                page = (
+                    supabase.table("faces")
+                    .select("drive_id, filename")
+                    .eq("cluster_id", cid)
+                    .range(offset, offset + 999)
+                    .execute()
+                ).data or []
+                rows.extend(page)
+                if len(page) < 1000:
+                    break
+                offset += 1000
+            for r in rows:
+                if not r.get("drive_id") or not r.get("filename"):
+                    continue
+                key = drive_record_path(r["drive_id"], r["filename"])
+                if key not in best:
+                    # Just inside tolerance: a real match, but ranked below
+                    # everything the selfie matched directly.
+                    best[key] = tolerance
+                    added += 1
+
+        log.info(
+            "Cluster expansion: %d cluster(s) with >=%d hits -> +%d photos (%d total)",
+            len(strong), min_hits, added, len(best),
+        )
+    except Exception as e:
+        log.warning("Cluster expansion skipped: %s", e)
+
+    return best
 
 
 def resolve_one_drive_id(path: str, default: str = "") -> str:

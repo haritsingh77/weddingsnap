@@ -51,7 +51,17 @@ class InsightFaceBackend(FaceBackend):
             os.environ.setdefault("INSIGHTFACE_HOME", root)
 
         log.info("Loading InsightFace model '%s' with providers: %s", self.model_name, providers)
-        app = FaceAnalysis(name=self.model_name, providers=providers)
+        # Load only what detect_and_encode actually reads: bbox + det_score from
+        # detection, and embedding from recognition. Left to itself FaceAnalysis
+        # also loads 3D landmarks (137 MB), 2D landmarks and gender/age, none of
+        # which anything here touches — 143 MB of the 325 MB of buffalo_l
+        # weights, plus their runtime buffers, for nothing. That waste is the
+        # difference between fitting a 512 MB host and not.
+        modules = os.getenv("INSIGHTFACE_MODULES", "detection,recognition").strip()
+        kwargs = {"name": self.model_name, "providers": providers}
+        if modules and modules != "all":
+            kwargs["allowed_modules"] = [m.strip() for m in modules.split(",") if m.strip()]
+        app = FaceAnalysis(**kwargs)
         # Larger det_size recovers small faces in group photos (see config.det_size).
         app.prepare(
             ctx_id=0 if "CUDA" in str(providers) else -1,
