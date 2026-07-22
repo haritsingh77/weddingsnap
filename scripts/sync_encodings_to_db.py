@@ -306,6 +306,75 @@ def assign_clusters(sb, face_rows: list[dict], snapshot: tuple[dict, dict]) -> N
     )
 
 
+def sync_faceless_photos(sb, records: list[dict], album: str | None) -> int:
+    """Give photos containing no detected face a row of their own.
+
+    sync_faces() only creates rows for pkl records, and the preprocessor writes
+    no record when it finds no face. On this album that silently hid 1,110 files
+    — roughly 10% — because decor, venue, food and detail shots contain no
+    people. They belong in the gallery even though nobody is in them.
+
+    is_common is set True deliberately: get_guest_photos() shows a photo only if
+    it is common OR personally matched, and a photo with no faces can never be
+    personally matched. Without this flag these would exist in the table and
+    still be invisible.
+    """
+    import sys as _sys
+    _sys.path.insert(0, str(project_root / "backend"))
+    try:
+        from app.config import settings
+        from app.services.drive_service import list_files_in_folder
+        from scripts.face_engine.pipeline import SUPPORTED_EXTENSIONS
+    except Exception as e:
+        print(f"! Cannot list Drive to find face-free photos ({str(e)[:60]}) — skipped")
+        return 0
+
+    drive = list_files_in_folder(settings.GOOGLE_DRIVE_FOLDER_ID, media_type="all")
+    media = [
+        f for f in drive
+        if Path(f["name"]).suffix.lower() in SUPPORTED_EXTENSIONS
+        and not f["name"].startswith("._")
+    ]
+    have = {r.get("drive_id") for r in records if r.get("drive_id")}
+    faceless = [f for f in media if f["id"] not in have]
+    if not faceless:
+        print("No face-free media to add.")
+        return 0
+
+    rows = [
+        {"drive_path": f["id"], "filename": f["name"],
+         "is_common": True, "face_count": 0}
+        for f in faceless
+    ]
+    print(f"Adding {len(rows):,} face-free photo(s) so the whole album is browsable...")
+    for i in range(0, len(rows), 500):
+        sb.table("photos").upsert(rows[i : i + 500], on_conflict="drive_path").execute()
+
+    if album:
+        try:
+            data = sb.storage.from_(BUCKET).download("categories.json")
+            cats = json.loads(data.decode("utf-8"))
+        except Exception:
+            cats = {}
+        existing = set(cats.get(album, []))
+        cats[album] = sorted(existing | {f["id"] for f in faceless})
+        blob = json.dumps(cats, indent=2).encode("utf-8")
+        # remove-then-upload: update() on this bucket has silently kept serving
+        # the old object, so a plain overwrite cannot be trusted here
+        try:
+            sb.storage.from_(BUCKET).remove(["categories.json"])
+        except Exception:
+            pass
+        sb.storage.from_(BUCKET).upload(
+            path="categories.json", file=blob,
+            file_options={"content-type": "application/json",
+                          "upsert": "true", "cache-control": "0"},
+        )
+        print(f'  also collected into the "{album}" album ({len(cats[album]):,} items)')
+
+    return len(rows)
+
+
 def migrate_disassociations(sb) -> None:
     """Fold legacy disassociated_photos.json into guest_photo_disassociations."""
     try:
@@ -342,6 +411,10 @@ def main() -> None:
     ap.add_argument("--migrate-disassociations", action="store_true")
     ap.add_argument("--no-cluster", action="store_true",
                     help="skip cluster assignment (faces sync only)")
+    ap.add_argument("--faceless-album", default="Venue",
+                    help='album to collect face-free photos into ("" to skip the album)')
+    ap.add_argument("--no-faceless", action="store_true",
+                    help="do not add rows for photos with no detected face")
     args = ap.parse_args()
 
     sb = get_client()
@@ -360,6 +433,9 @@ def main() -> None:
 
     if not args.no_cluster:
         assign_clusters(sb, face_rows, snapshot)
+
+    if not args.no_faceless:
+        sync_faceless_photos(sb, records, args.faceless_album or None)
 
     if args.migrate_disassociations:
         migrate_disassociations(sb)
