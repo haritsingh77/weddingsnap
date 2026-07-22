@@ -30,11 +30,9 @@ export default function Landing() {
                     localStorage.setItem('event_name', event_name)
                     localStorage.setItem('invite_code', code.toUpperCase().trim())
                     
-                    if (has_selfie) {
-                        navigate('/gallery')
-                    } else {
-                        navigate('/register')
-                    }
+                    // No selfie step any more — a guest's photos are already
+                    // decided by the clustering, so go straight to the gallery.
+                    navigate('/gallery')
                 } catch (err) {
                     console.error("Auto login failed:", err)
                     setError(err.response?.data?.detail || 'Auto-login failed. Please verify credentials manually.')
@@ -61,11 +59,7 @@ export default function Landing() {
             localStorage.setItem('event_name', event_name)
             localStorage.setItem('invite_code', form.code.toUpperCase().trim())
             
-            if (has_selfie) {
-                navigate('/gallery')
-            } else {
-                navigate('/register')
-            }
+            navigate('/gallery')
         } catch (err) {
             setError(err.response?.data?.detail || 'Invalid code or something went wrong.')
         } finally {

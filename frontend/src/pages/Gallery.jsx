@@ -892,15 +892,10 @@ export default function Gallery() {
                     </div>
                     
                     <div className="flex gap-2 shrink-0">
-                        <button
-                            onClick={() => navigate('/register')}
-                            title="Re-scan your face"
-                            className="bg-white border border-gold-200/60 text-taupe-700 text-xs font-semibold px-3 sm:px-4 py-2.5 rounded-xl whitespace-nowrap hover:bg-ivory-100 hover:border-gold-200 transition-all duration-300 cursor-pointer"
-                        >
-                            <span aria-hidden="true">📸</span>
-                            <span className="hidden sm:inline"> Re-Scan Face</span>
-                            <span className="sr-only">Re-scan face</span>
-                        </button>
+                        {/* The "Re-Scan Face" button is gone. Photos are matched
+                            by the clustering, which a human has already named, so
+                            there is nothing for a guest to re-scan — the button
+                            only led to a screen that could fail to find a face. */}
                         <button
                             onClick={() => navigate('/download')}
                             className="bg-taupe-800 text-white text-xs font-semibold px-3 sm:px-4 py-2.5 rounded-xl whitespace-nowrap hover:bg-gold-600 hover:shadow-lg hover:shadow-gold-500/20 transition-all duration-300 cursor-pointer"
@@ -1648,17 +1643,18 @@ export default function Gallery() {
                                             {tab === 'mine' 
                                                 ? "We couldn't find any individual moments of you. Check Group Moments or scan again."
                                                 : tab === 'common' 
-                                                ? "No group moments have matched your selfie yet." 
-                                                : "We couldn't find any matched moments of you yet."
+                                                ? "No group moments here yet." 
+                                                : "We haven't found any photos of you yet."
                                             }
                                         </p>
                                         {total === 0 && (
-                                            <button
-                                                onClick={() => navigate('/register')}
-                                                className="mt-2 bg-taupe-900 text-white text-xs font-semibold px-6 py-3 rounded-xl hover:bg-gold-600 transition duration-300 cursor-pointer"
-                                            >
-                                                Scan Your Selfie Again
-                                            </button>
+                                            // Nothing for a guest to retry — matching happens
+                                            // during preprocessing, not on demand. Point them
+                                            // at someone who can actually fix it.
+                                            <p className="mt-2 text-taupe-400 text-xs">
+                                                If you think some are missing, let the couple know
+                                                and they can add you.
+                                            </p>
                                         )}
                                     </div>
                                 )}

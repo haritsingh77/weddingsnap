@@ -46,18 +46,6 @@ export const openGuestLink = (token) => api.get(`/auth/link/${token}`)
 export const verifyInvite = (code, name, phone) =>
   api.post('/auth/verify-invite', { code, name, phone })
 
-export const registerFace = (guestId, selfieFiles) => {
-  const form = new FormData()
-  form.append('guest_id', guestId)
-  // selfieFiles can be a single File or an array of Files
-  const files = Array.isArray(selfieFiles) ? selfieFiles : [selfieFiles]
-  files.forEach((file, idx) => {
-    const key = idx === 0 ? 'selfie' : `selfie${idx + 1}`
-    form.append(key, file)
-  })
-  return api.post('/faces/register', form)
-}
-
 export const getPhotos = (guestId, page = 1) =>
   api.get(`/photos/${guestId}?page=${page}&limit=50`)
 

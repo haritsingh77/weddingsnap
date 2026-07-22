@@ -15,7 +15,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+
+from app.auth_deps import guest_or_admin
 from fastapi.responses import FileResponse
 
 from app.database import supabase
@@ -23,7 +25,15 @@ from app.services.drive_service import download_file_to_memory
 from app.services.drive_cache import LOCAL_CACHE_DIR
 
 log = logging.getLogger(__name__)
-router = APIRouter(prefix="/download", tags=["download"])
+# This router serves the actual photo archive, so it needs the same protection
+# as photos.py and faces.py. It was missed in the first pass: /download/{id}/prepare
+# and /stream/{session} were reachable without any credential, which is the whole
+# album in one file.
+router = APIRouter(
+    prefix="/download",
+    tags=["download"],
+    dependencies=[Depends(guest_or_admin)],
+)
 
 ZIP_DIR = LOCAL_CACHE_DIR / "zips"
 ZIP_DIR.mkdir(parents=True, exist_ok=True)
@@ -74,20 +84,61 @@ def _download_one(drive_id: str, is_common: bool, index: int):
 
 
 def _collect_rows(guest_id: str) -> list[tuple]:
-    """(drive_id, is_common, index) for every photo in the guest's download."""
-    gp_res = supabase.table("guest_photos").select("photo_id").eq("guest_id", guest_id).execute()
-    personal_ids = [str(row["photo_id"]) for row in gp_res.data] if (gp_res.data and len(gp_res.data) > 0) else []
+    """(drive_id, is_common, index) for every photo in the guest's download.
 
-    if personal_ids:
-        or_filter = f"is_common.eq.true,id.in.({','.join(personal_ids)})"
-        result = supabase.table("photos").select("drive_path, is_common").or_(or_filter).execute()
-    else:
-        result = supabase.table("photos").select("drive_path, is_common").eq("is_common", True).execute()
+    Paged throughout. Unpaged, PostgREST capped this at 1000 rows without error,
+    so a guest's zip quietly stopped at 1000 files — and a zip that downloads
+    successfully but is missing most of the photos is worse than one that fails,
+    because nobody notices.
 
+    The personal ids also go through an .in_() filter, which lands in the URL, so
+    a guest with thousands of photos would otherwise blow the URL length limit.
+    """
+    from app.services.db_paging import chunked, fetch_all
+
+    personal_ids = [
+        str(r["photo_id"])
+        for r in fetch_all(
+            lambda a, b: supabase.table("guest_photos")
+            .select("photo_id")
+            .eq("guest_id", guest_id)
+            .range(a, b)
+        )
+    ]
+
+    rows: list[dict] = []
+    seen: set[str] = set()
+
+    # Everything flagged common, for everyone.
+    for r in fetch_all(
+        lambda a, b: supabase.table("photos")
+        .select("drive_path, is_common")
+        .eq("is_common", True)
+        .range(a, b)
+    ):
+        if r.get("drive_path") and r["drive_path"] not in seen:
+            seen.add(r["drive_path"])
+            rows.append(r)
+
+    # Plus this guest's own photos, in id batches.
+    for batch in chunked(personal_ids, 200):
+        for r in (
+            supabase.table("photos")
+            .select("drive_path, is_common")
+            .in_("id", batch)
+            .execute()
+        ).data or []:
+            if r.get("drive_path") and r["drive_path"] not in seen:
+                seen.add(r["drive_path"])
+                rows.append(r)
+
+    log.info(
+        "Download for %s: %d file(s) (%d personal)",
+        guest_id, len(rows), len(personal_ids),
+    )
     return [
-        (row["drive_path"], row.get("is_common", False), i)
-        for i, row in enumerate(result.data)
-        if row.get("drive_path")
+        (r["drive_path"], r.get("is_common", False), i)
+        for i, r in enumerate(rows)
     ]
 
 
@@ -159,8 +210,14 @@ def build_zip(guest_id: str, session_id: str):
 
 
 @router.post("/{guest_id}/prepare")
-async def prepare_download(guest_id: str, background_tasks: BackgroundTasks):
+async def prepare_download(
+    guest_id: str,
+    background_tasks: BackgroundTasks,
+    caller: dict = Depends(guest_or_admin),
+):
     """Kick off ZIP generation in the background."""
+    if not caller.get("is_admin") and caller.get("id") != guest_id:
+        raise HTTPException(status_code=403, detail="This link cannot download that album.")
     guest = supabase.table("guests").select("id").eq("id", guest_id).execute()
     if not guest.data:
         raise HTTPException(status_code=404, detail="Guest not found")
@@ -195,8 +252,18 @@ async def download_status(session_id: str):
 
 
 @router.get("/{guest_id}/stream/{session_id}")
-async def stream_zip(guest_id: str, session_id: str):
+async def stream_zip(
+    guest_id: str,
+    session_id: str,
+    caller: dict = Depends(guest_or_admin),
+):
     """Stream the pre-built ZIP file to the guest. No re-download needed."""
+    # The session lookup below already pins the zip to a guest_id, but that only
+    # stops a mismatched pair — it would still hand over another guest's archive
+    # to anyone holding both ids. This ties it to the caller's own token.
+    if not caller.get("is_admin") and caller.get("id") != guest_id:
+        raise HTTPException(status_code=403, detail="This link cannot download that album.")
+
     session = supabase.table("download_sessions").select("*").eq(
         "id", session_id
     ).eq("guest_id", guest_id).eq("status", "ready").execute()
