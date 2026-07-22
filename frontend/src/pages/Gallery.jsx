@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
+  withToken,
   getPhotos,
   getAllPhotos,
   getPhotoPeople,
@@ -160,7 +161,7 @@ function GalleryPhotoCard({
                 <div className="w-full h-full relative bg-taupe-900 flex flex-col items-center justify-center overflow-hidden">
                     {/* Video first-frame thumbnail background */}
                     <img
-                        src={`${API_BASE}${photo.thumb_url}`}
+                        src={withToken(`${API_BASE}${photo.thumb_url}`)}
                         alt=""
                         loading="lazy"
                         className="absolute inset-0 w-full h-full object-cover opacity-60 transition-transform duration-700 ease-out group-hover:scale-105"
@@ -191,7 +192,7 @@ function GalleryPhotoCard({
                 </div>
             ) : (
                 <img
-                    src={`${API_BASE}${photo.thumb_url}`}
+                    src={withToken(`${API_BASE}${photo.thumb_url}`)}
                     alt={mediaLabel}
                     loading="lazy"
                     decoding="async"
@@ -322,7 +323,11 @@ export default function Gallery() {
         setLoading(true)
         setError('')
         try {
-            const res = tab === 'all'
+            // /photos/all is every photo in the wedding, so it is admin-only.
+            // A guest's "All Moments" is their own album — their matched photos
+            // plus everything flagged common — which is what /photos/{id}
+            // already returns.
+            const res = (tab === 'all' && isAdmin)
                 ? await getAllPhotos(p)
                 : await getPhotos(guestId, p)
             const { photos: newPhotos, has_more, total: totalPhotos, family_members: fetchedFamilyMembers } = res.data
@@ -448,8 +453,11 @@ export default function Gallery() {
         }
     }, [tab])
 
-    // Fetch guests list once on mount
+    // Admin only. The list of every guest is admin data — it powers "share this
+    // photo with…", which guests cannot do — and the endpoint now enforces that,
+    // so calling it unconditionally just produced a 403 in every guest's console.
     useEffect(() => {
+        if (!isAdmin) return
         const fetchGuests = async () => {
             try {
                 const res = await getGuestsList()
@@ -459,7 +467,7 @@ export default function Gallery() {
             }
         }
         fetchGuests()
-    }, [])
+    }, [isAdmin])
 
     const handleClusterClick = async (clusterId) => {
         setSelectedCluster(clusterId)
@@ -664,7 +672,7 @@ export default function Gallery() {
         const driveId = photoObj.drive_id
         setDownloadingPhoto(driveId)
         try {
-            const downloadUrl = `${API_BASE}/photos/stream/${driveId}?download=true`
+            const downloadUrl = withToken(`${API_BASE}/photos/stream/${driveId}?download=true`)
             const link = document.createElement('a')
             link.href = downloadUrl
             link.target = '_blank'
@@ -1019,7 +1027,7 @@ export default function Gallery() {
                                     >
                                         <div className="relative w-24 h-24 sm:w-28 sm:h-28 rounded-full overflow-hidden border-2 border-transparent group-hover:border-gold-500 shadow-md transition-all duration-300 transform group-hover:scale-105">
                                             <img
-                                                src={`${API_BASE}${cluster.thumbnail_url}`}
+                                                src={withToken(`${API_BASE}${cluster.thumbnail_url}`)}
                                                 alt=""
                                                 className="w-full h-full object-cover bg-ivory-200"
                                                 loading="lazy"
@@ -1189,7 +1197,7 @@ export default function Gallery() {
                                         <div className="aspect-[4/3] relative rounded-xl overflow-hidden bg-ivory-200 border border-gold-100 shadow-inner">
                                             {cat.thumbnail_url ? (
                                                 <img
-                                                    src={`${API_BASE}${cat.thumbnail_url}`}
+                                                    src={withToken(`${API_BASE}${cat.thumbnail_url}`)}
                                                     alt=""
                                                     className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
                                                     loading="lazy"
@@ -1279,7 +1287,7 @@ export default function Gallery() {
                         {selectedCluster && (() => {
                             const clusterObj = clusters.find(c => c.id === selectedCluster);
                             const name = clusterObj?.name || (selectedCluster.startsWith('guest_') ? 'Loading...' : `Person #${selectedCluster}`);
-                            const thumbnail = clusterObj?.thumbnail_url ? `${API_BASE}${clusterObj.thumbnail_url}?t=${clusterCacheBuster}` : null;
+                            const thumbnail = clusterObj?.thumbnail_url ? withToken(`${API_BASE}${clusterObj.thumbnail_url}?cb=${clusterCacheBuster}`) : null;
 
                             return (
                                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 mb-8 pb-6 border-b border-gold-200/50">
@@ -1566,7 +1574,7 @@ export default function Gallery() {
                                             >
                                                 <div className="w-5 h-5 rounded-full overflow-hidden border border-gold-200/60 bg-ivory-200 flex-shrink-0 flex items-center justify-center">
                                                     <img
-                                                        src={`${API_BASE}/faces/members/${member.id}/selfie`}
+                                                        src={withToken(`${API_BASE}/faces/members/${member.id}/selfie`)}
                                                         alt={member.name}
                                                         className="w-full h-full object-cover"
                                                         onError={(e) => {
@@ -1699,7 +1707,7 @@ export default function Gallery() {
 
                         {activePhoto.is_video ? (
                             <video
-                                src={`${API_BASE}/photos/stream/${activePhoto.drive_id}`}
+                                src={withToken(`${API_BASE}/photos/stream/${activePhoto.drive_id}`)}
                                 controls
                                 autoPlay
                                 onLoadedData={() => setMediaLoading(false)}
@@ -1708,7 +1716,7 @@ export default function Gallery() {
                             />
                         ) : (
                             <img 
-                                src={`${API_BASE}/photos/stream/${activePhoto.drive_id}`}
+                                src={withToken(`${API_BASE}/photos/stream/${activePhoto.drive_id}`)}
                                 alt=""
                                 onLoad={() => setMediaLoading(false)}
                                 onError={(e) => console.error("Image load error for ID " + activePhoto.drive_id + ":", e)}
@@ -1798,7 +1806,7 @@ export default function Gallery() {
                                                 className="flex items-center gap-1.5 bg-white/8 hover:bg-white/15 border border-white/10 hover:border-gold-400/40 rounded-full px-3 py-1.5 transition-all duration-200 cursor-pointer group"
                                             >
                                                 <img
-                                                    src={`${API_BASE}${person.thumbnail_url}`}
+                                                    src={withToken(`${API_BASE}${person.thumbnail_url}`)}
                                                     alt={person.name}
                                                     className="w-6 h-6 rounded-full object-cover border border-white/20"
                                                     onError={e => { e.target.style.display = 'none' }}
@@ -1927,7 +1935,7 @@ export default function Gallery() {
                                             className="aspect-square relative group overflow-hidden bg-ivory-200 border border-gold-200/50 rounded-xl cursor-pointer hover:border-gold-500 hover:shadow transition-all duration-300"
                                         >
                                             <img 
-                                                src={`${API_BASE}${photo.thumb_url}`} 
+                                                src={withToken(`${API_BASE}${photo.thumb_url}`)} 
                                                 alt=""
                                                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-550"
                                             />
@@ -1989,7 +1997,7 @@ export default function Gallery() {
                                             <div className="flex items-center gap-3">
                                                 <div className="w-8 h-8 rounded-full bg-ivory-200 border border-gold-200/60 flex items-center justify-center text-xs font-semibold text-taupe-700 overflow-hidden">
                                                     <img
-                                                        src={`${API_BASE}/faces/guests/${guest.id}/selfie`}
+                                                        src={withToken(`${API_BASE}/faces/guests/${guest.id}/selfie`)}
                                                         alt=""
                                                         className="w-full h-full object-cover"
                                                         onError={(e) => { e.target.src = '/logo.png' }}

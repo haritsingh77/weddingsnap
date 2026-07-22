@@ -9,7 +9,7 @@ the login screen only — every endpoint behind it was directly reachable.
 
 Two credentials:
 
-  guest token   X-Guest-Token, or ?t= for links a browser follows directly
+  guest token   X-Guest-Token, or ?tk= for links a browser follows directly
                 (image src, video src, download). Identifies one guest and
                 grants READ access to that guest's own photos.
 
@@ -64,15 +64,16 @@ def _lookup(token: str) -> Optional[dict]:
 
 def require_guest(
     x_guest_token: str | None = Header(None, alias="X-Guest-Token"),
-    t: str | None = Query(None, description="token, for URLs the browser loads directly"),
+    tk: str | None = Query(None, description="token, for URLs the browser loads directly"),
 ) -> dict:
     """Resolve the caller to a guest, or 401.
 
     The query-string form exists because <img>, <video> and download links
-    cannot carry custom headers. It is the same token either way; anything
+    cannot carry custom headers. It is ?tk= rather than ?t= because the gallery
+    already uses ?t= as a cache-buster. It is the same token either way; anything
     sensitive enough to matter is behind an admin check instead.
     """
-    token = (x_guest_token or t or "").strip()
+    token = (x_guest_token or tk or "").strip()
     if not token:
         raise HTTPException(status_code=401, detail="This link is missing its access code.")
 
@@ -102,7 +103,7 @@ def require_admin(
 
 def guest_or_admin(
     x_guest_token: str | None = Header(None, alias="X-Guest-Token"),
-    t: str | None = Query(None),
+    tk: str | None = Query(None),
     x_admin_password: str | None = Header(None, alias="x-admin-password"),
     password: str | None = Query(None),
 ) -> dict:
@@ -116,6 +117,6 @@ def guest_or_admin(
     if admin_supplied and expected and secrets.compare_digest(admin_supplied, expected):
         return {"id": None, "name": "admin", "is_admin": True}
 
-    guest = require_guest(x_guest_token, t)
+    guest = require_guest(x_guest_token, tk)
     guest["is_admin"] = False
     return guest

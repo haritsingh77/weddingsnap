@@ -20,8 +20,28 @@ api.interceptors.request.use((config) => {
   if (adminPass) {
     config.headers['x-admin-password'] = adminPass
   }
+  const guestToken = localStorage.getItem('guest_token')
+  if (guestToken) {
+    config.headers['X-Guest-Token'] = guestToken
+  }
   return config
 })
+
+// Every photo endpoint now requires a credential. <img>, <video> and download
+// links cannot send headers, so those URLs carry the token as ?tk= instead
+// (?t= is already the gallery's cache-buster).
+export const withToken = (url) => {
+  const token = localStorage.getItem('guest_token')
+  const admin = localStorage.getItem('admin_password')
+  if (!token && !admin) return url
+  const sep = url.includes('?') ? '&' : '?'
+  return token
+    ? `${url}${sep}tk=${encodeURIComponent(token)}`
+    : `${url}${sep}password=${encodeURIComponent(admin)}`
+}
+
+// A guest's whole login is opening their link — no code, no name, no selfie.
+export const openGuestLink = (token) => api.get(`/auth/link/${token}`)
 
 export const verifyInvite = (code, name, phone) =>
   api.post('/auth/verify-invite', { code, name, phone })
