@@ -46,7 +46,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 project_root = Path(__file__).resolve().parent.parent
@@ -156,7 +156,7 @@ def main() -> None:
                 ignored_files += list(d.glob("*.jpg"))
 
         named: dict[str, dict] = defaultdict(lambda: {"clusters": set(), "files": []})
-        key_aliases: dict[str, str] = {}
+        casings: dict[str, list[str]] = defaultdict(list)
         unmatched, untouched = [], []
         ignored_clusters: set[int] = set()
 
@@ -173,12 +173,36 @@ def main() -> None:
             # person typed twice, and letting them through would create two
             # people in the gallery. Genuinely distinct same-named guests are
             # separated with a '#qualifier', not by capitalisation.
-            n = key_aliases.setdefault(n.casefold(), n)
+            casings[n.casefold()].append(n)
+            n = n.casefold()
             named[n]["clusters"].add(entry["cluster"])
             named[n]["files"].append(f.name)
             named[n].setdefault("photos", set()).update(entry["member_photos"])
             named[n].setdefault("impure", False)
             named[n]["impure"] |= bool(entry.get("impure"))
+
+        # Choose each person's canonical spelling from every variant seen, not
+        # from whichever file happened to sort first — that picked "Sk_Singh"
+        # over "SK_Singh" purely because batch2 sorts before batch1. Prefer the
+        # most frequent spelling, then the one with more capitals, since names
+        # like SK and BK are initials and lowercasing them looks wrong.
+        # Ranked: reject SHOUTED spellings first, then prefer more capitals,
+        # then frequency. Capitals beat frequency because initials carry
+        # meaning — "SK_Singh" is right even though "Sk_Singh" was typed more
+        # often — while the all-caps guard stops "NITA" beating "Nita".
+        canonical = {}
+        for key, variants in casings.items():
+            counts = Counter(variants)
+            letters = lambda v: [c for c in v if c.isalpha()]
+            canonical[key] = max(
+                counts,
+                key=lambda v: (
+                    not (letters(v) and all(c.isupper() for c in letters(v))),
+                    sum(c.isupper() for c in v),
+                    counts[v],
+                ),
+            )
+        named = {canonical[k]: v for k, v in named.items()}
 
         for f in ignored_files:
             entry = hash_to_entry.get(file_hash(f))
