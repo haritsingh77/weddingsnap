@@ -62,3 +62,4 @@ cluster_names_by_photos.json
 
 # DB/state backups: guest names, phones, selfie images
 backups/
+guest_links.csv
