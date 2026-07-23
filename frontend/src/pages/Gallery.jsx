@@ -288,6 +288,10 @@ export default function Gallery() {
     const [guestsList, setGuestsList] = useState([])
     const [showShareDropdown, setShowShareDropdown] = useState(false)
     const [shareSearchQuery, setShareSearchQuery] = useState('')
+    // Multi-assign: a group photo can hold several people the detector missed,
+    // so the modal collects a set of guests and assigns them all in one action.
+    const [selectedShareGuests, setSelectedShareGuests] = useState([])
+    const [sharing, setSharing] = useState(false)
 
     // Face Merging states
     const [selectedClusterIds, setSelectedClusterIds] = useState([])
@@ -642,14 +646,31 @@ export default function Gallery() {
         }
     }
 
-    const handleSharePhoto = async (photoObj, guestId) => {
+    const toggleShareGuest = (guestId) => {
+        setSelectedShareGuests(prev =>
+            prev.includes(guestId) ? prev.filter(g => g !== guestId) : [...prev, guestId]
+        )
+    }
+
+    const handleAssignPhoto = async (photoObj) => {
+        if (selectedShareGuests.length === 0) return
+        setSharing(true)
         try {
-            await sharePhoto(photoObj.drive_id, guestId)
-            alert("Photo shared with guest successfully!")
+            // One call per guest against the existing share endpoint. A group
+            // photo assigned to several people lands in each of their "Just Me".
+            await Promise.all(selectedShareGuests.map(gid => sharePhoto(photoObj.drive_id, gid)))
+            const names = guestsList
+                .filter(g => selectedShareGuests.includes(g.id))
+                .map(g => g.name)
+            alert(`Added to ${names.length === 1 ? names[0] : names.length + " people"}'s photos.`)
             setShowShareDropdown(false)
+            setSelectedShareGuests([])
+            setShareSearchQuery('')
         } catch (err) {
-            console.error("Failed to share photo:", err)
-            alert("Failed to share photo. Please try again.")
+            console.error("Failed to assign photo:", err)
+            alert("Something went wrong assigning the photo. Please try again.")
+        } finally {
+            setSharing(false)
         }
     }
 
@@ -1984,13 +2005,18 @@ export default function Gallery() {
                             ) : (
                                 guestsList
                                     .filter(g => g.name.toLowerCase().includes(shareSearchQuery.toLowerCase()))
-                                    .map(guest => (
+                                    .map(guest => {
+                                        const picked = selectedShareGuests.includes(guest.id)
+                                        return (
                                         <div
                                             key={guest.id}
-                                            onClick={() => handleSharePhoto(activePhoto, guest.id)}
-                                            className="px-6 py-3.5 flex items-center justify-between hover:bg-ivory-100 transition cursor-pointer"
+                                            onClick={() => toggleShareGuest(guest.id)}
+                                            className={`px-6 py-3.5 flex items-center justify-between transition cursor-pointer ${picked ? 'bg-gold-100/60' : 'hover:bg-ivory-100'}`}
                                         >
                                             <div className="flex items-center gap-3">
+                                                <div className={`w-5 h-5 rounded-md border flex items-center justify-center text-white text-xs ${picked ? 'bg-taupe-800 border-taupe-800' : 'border-gold-300 bg-white'}`}>
+                                                    {picked ? '✓' : ''}
+                                                </div>
                                                 <div className="w-8 h-8 rounded-full bg-ivory-200 border border-gold-200/60 flex items-center justify-center text-xs font-semibold text-taupe-700 overflow-hidden">
                                                     <img
                                                         src={withToken(`${API_BASE}/faces/guests/${guest.id}/selfie`)}
@@ -2004,12 +2030,25 @@ export default function Gallery() {
                                                     <p className="text-[10px] text-taupe-400">{guest.phone || 'No phone number'}</p>
                                                 </div>
                                             </div>
-                                            <span className="text-[10px] bg-ivory-200 text-taupe-600 px-2.5 py-1 rounded-lg font-bold uppercase tracking-wider hover:bg-gold-100 transition-colors">
-                                                Share
-                                            </span>
                                         </div>
-                                    ))
+                                        )
+                                    })
                             )}
+                        </div>
+
+                        <div className="px-6 py-4 border-t border-stone-150 flex items-center justify-between gap-3">
+                            <span className="text-xs text-taupe-500">
+                                {selectedShareGuests.length === 0
+                                    ? 'Select one or more people'
+                                    : `${selectedShareGuests.length} selected`}
+                            </span>
+                            <button
+                                onClick={() => handleAssignPhoto(activePhoto)}
+                                disabled={selectedShareGuests.length === 0 || sharing}
+                                className="bg-taupe-800 text-white text-xs font-semibold px-5 py-2.5 rounded-xl hover:bg-gold-650 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                                {sharing ? 'Assigning…' : `Assign${selectedShareGuests.length ? ` to ${selectedShareGuests.length}` : ''}`}
+                            </button>
                         </div>
                     </div>
                 </div>

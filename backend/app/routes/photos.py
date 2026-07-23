@@ -747,14 +747,21 @@ async def get_guest_photos(
         result = supabase.table("photos").select("drive_path, is_common, face_count")            .eq("is_common", True)            .order("created_at", desc=True)            .range(offset, offset + limit - 1)            .execute()
 
     elif want == "mine" and personal_ids:
-        # This guest's own photos, excluding group shots. Read through
-        # guest_photos so the id list stays inside the join — 1,600 ids in an
-        # .in_() filter would exceed the URL length limit.
+        # "Just Me" = every photo this guest is IN, which is exactly their
+        # guest_photos rows — solo shots AND group shots they were matched or
+        # manually assigned to. A group photo she is in shows here and in Group
+        # Moments both, which is correct: it is a photo of her and a group
+        # moment. Filtering these to is_common=False (an earlier attempt) hid
+        # the group photos she is actually in — 292 of them for one guest — and
+        # it is also what makes admin "assign to this person" work, since an
+        # assigned photo just becomes another guest_photos row.
+        #
+        # Read through guest_photos so the id list stays inside the join; 1,900
+        # ids in an .in_() filter would exceed the URL length limit.
         rows = fetch_all(
             lambda a, b: supabase.table("guest_photos")
             .select("photos!inner(drive_path, is_common, face_count)")
             .eq("guest_id", guest_id)
-            .eq("photos.is_common", False)
             .range(a, b)
         )
         flat = [r["photos"] for r in rows if r.get("photos")]
