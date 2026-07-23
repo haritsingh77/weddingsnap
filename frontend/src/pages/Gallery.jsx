@@ -254,7 +254,9 @@ export default function Gallery() {
     const [page, setPage] = useState(1)
     const [hasMore, setHasMore] = useState(false)
     const [total, setTotal] = useState(0)
-    const [tab, setTab] = useState('all')  // all | mine | common | people
+    // "All Moments" is the whole-wedding view and is admin-only, so guests land
+    // on their own "Just Me". Admins keep All Moments as the default.
+    const [tab, setTab] = useState(isAdmin ? 'all' : 'mine')  // all | mine | common | people
     // The guest's OWN matched count, independent of the active tab. The header
     // must never show the "All Moments" total (that's every file in the Drive,
     // not photos matched to this guest).
@@ -934,7 +936,7 @@ export default function Gallery() {
 
                 {/* Aesthetic Navigation Tabs */}
                 <div className="max-w-4xl mx-auto flex gap-5 sm:gap-6 mt-4 sm:mt-6 border-t border-gold-100 pt-4 overflow-x-auto whitespace-nowrap scrollbar-none -mx-4 px-4 sm:mx-0 sm:px-0">
-                    {['all', 'mine', 'common', 'people', 'categories'].filter(t => t !== 'people' || isAdmin).map(t => (
+                    {['all', 'mine', 'common', 'people', 'categories'].filter(t => (t !== 'people' && t !== 'all') || isAdmin).map(t => (
                         <button
                             key={t}
                             onClick={() => {
