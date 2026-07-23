@@ -68,6 +68,11 @@ export const getDownloadStatus = (sessionId) =>
 export const getStreamUrl = (guestId, sessionId) =>
   `${api.defaults.baseURL}/download/${guestId}/stream/${sessionId}`
 
+// Direct streaming download of the whole album — the browser downloads the ZIP
+// as the server generates it (no prepare/poll, no server-side /tmp build).
+export const getDownloadAllUrl = (guestId) =>
+  withToken(`${api.defaults.baseURL}/download/${guestId}/all`)
+
 export const getFaceClusters = () =>
   api.get('/faces/clusters')
 

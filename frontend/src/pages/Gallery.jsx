@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   withToken,
+  getDownloadAllUrl,
   getPhotos,
   getAllPhotos,
   getPhotoPeople,
@@ -926,7 +927,7 @@ export default function Gallery() {
                             there is nothing for a guest to re-scan — the button
                             only led to a screen that could fail to find a face. */}
                         <button
-                            onClick={() => navigate('/download')}
+                            onClick={() => { window.location.href = getDownloadAllUrl(guestId) }}
                             className="bg-taupe-800 text-white text-xs font-semibold px-3 sm:px-4 py-2.5 rounded-xl whitespace-nowrap hover:bg-gold-600 hover:shadow-lg hover:shadow-gold-500/20 transition-all duration-300 cursor-pointer"
                         >
                             Download<span className="hidden sm:inline"> All</span>
