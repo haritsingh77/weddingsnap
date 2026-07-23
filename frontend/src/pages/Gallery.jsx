@@ -238,9 +238,15 @@ export default function Gallery() {
     const guestName = localStorage.getItem('guest_name')
     const eventName = localStorage.getItem('event_name')
     const inviteCode = localStorage.getItem('invite_code') || ''
-    const isAdmin = inviteCode.toUpperCase().includes('ADMIN') ||
-                    guestName?.toLowerCase().includes('saurav') ||
-                    guestName?.toLowerCase().includes('mahima')
+    // Admin is decided ONLY by holding the admin password (set on the Admin
+    // page, stored in localStorage). The old heuristic keyed off the guest's
+    // name ("saurav"/"mahima") or an "ADMIN" invite code — which flipped the
+    // bride's own album into admin mode: "All Moments" then called the
+    // admin-only /photos/all (401 for her, so it showed empty) and the People
+    // tab appeared but was backed by admin endpoints she couldn't call. The
+    // backend already enforces admin on every route, so presence of the
+    // password is the right and only signal here.
+    const isAdmin = !!localStorage.getItem('admin_password')
 
     const [photos, setPhotos] = useState([])
     const [loading, setLoading] = useState(true)
