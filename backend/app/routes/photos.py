@@ -769,10 +769,44 @@ async def get_guest_photos(
         result = _Rows(flat[offset : offset + limit])
 
     elif personal_ids:
-        or_filter = f"is_common.eq.true,id.in.({','.join(personal_ids)})"
-        count_res = supabase.table("photos").select("id", count="exact").or_(or_filter).execute()
-        total_count = count_res.count or 0
-        result = supabase.table("photos").select("drive_path, is_common, face_count")            .or_(or_filter)            .order("created_at", desc=True)            .range(offset, offset + limit - 1)            .execute()
+        # "All Moments" = every group photo plus every photo this guest is in.
+        # The obvious query — .or_("is_common.eq.true,id.in.(<personal ids>)") —
+        # puts every personal id in the URL, and past ~4,000 of them (the bride)
+        # that URL exceeds the length limit and the whole request 500s. So read
+        # both sets paged (fetch_all also dodges the 1,000-row cap) and merge
+        # them here. Personal photos come through the guest_photos join, exactly
+        # like the "mine" branch, so their ids never touch the URL.
+        common_rows = fetch_all(
+            lambda a, b: supabase.table("photos")
+            .select("drive_path, is_common, face_count, created_at")
+            .eq("is_common", True)
+            .range(a, b)
+        )
+        personal_rows = [
+            r["photos"]
+            for r in fetch_all(
+                lambda a, b: supabase.table("guest_photos")
+                .select("photos!inner(drive_path, is_common, face_count, created_at)")
+                .eq("guest_id", guest_id)
+                .range(a, b)
+            )
+            if r.get("photos")
+        ]
+        # Dedupe by drive_path — a group photo the guest is in is in both sets.
+        merged = {}
+        for p in common_rows + personal_rows:
+            dp = p.get("drive_path")
+            if dp and dp not in merged:
+                merged[dp] = p
+        # Newest first, matching the created_at desc ordering this branch used
+        # back when it was a single query.
+        ordered = sorted(
+            merged.values(),
+            key=lambda p: p.get("created_at") or "",
+            reverse=True,
+        )
+        total_count = len(ordered)
+        result = _Rows(ordered[offset : offset + limit])
 
     else:
         count_res = supabase.table("photos").select("id", count="exact").eq("is_common", True).execute()
