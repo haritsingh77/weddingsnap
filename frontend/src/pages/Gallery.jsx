@@ -1762,25 +1762,29 @@ export default function Gallery() {
                                 className="object-contain max-w-full max-h-[75vh] md:max-h-[80vh] rounded-lg shadow-2xl"
                             />
                         ) : (
-                            <div key={activePhoto.drive_id} className="relative inline-block">
-                                {/* Instant low-res placeholder — loads from the CDN, defines
-                                    the frame size, and is what shows through if the full-size
-                                    original can't be streamed. */}
+                            // Full-resolution original at full lightbox size. Its own
+                            // dimensions drive the layout (max 85vh tall / full width), so
+                            // the preview is large — not capped to a thumbnail. A soft
+                            // blurred thumbnail sits behind it as an instant placeholder
+                            // while the original streams in; if a file can't be streamed the
+                            // <img> falls back to that thumbnail.
+                            <div
+                                key={activePhoto.drive_id}
+                                className="relative flex items-center justify-center max-w-full max-h-[82vh]"
+                            >
                                 <img
                                     src={withToken(`${API_BASE}${activePhoto.thumb_url}`)}
                                     alt=""
                                     aria-hidden="true"
-                                    onLoad={() => setMediaLoading(false)}
-                                    className="object-contain max-w-full max-h-[75vh] md:max-h-[80vh] rounded-lg shadow-2xl"
+                                    className="absolute inset-0 w-full h-full object-contain rounded-lg blur-md scale-105 opacity-60"
                                 />
-                                {/* Full-resolution original, fades in over the placeholder. */}
                                 <img
                                     src={withToken(`${API_BASE}/photos/stream/${activePhoto.drive_id}`)}
                                     alt=""
                                     onLoad={(e) => { e.currentTarget.style.opacity = 1; setMediaLoading(false) }}
-                                    onError={(e) => { e.currentTarget.style.display = 'none' }}
-                                    style={{ opacity: 0, transition: 'opacity 0.5s ease' }}
-                                    className="absolute inset-0 w-full h-full object-contain rounded-lg shadow-2xl"
+                                    onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = withToken(`${API_BASE}${activePhoto.thumb_url}`); e.currentTarget.style.opacity = 1; setMediaLoading(false) }}
+                                    style={{ opacity: 0, transition: 'opacity 0.4s ease' }}
+                                    className="relative object-contain max-w-full max-h-[82vh] rounded-lg shadow-2xl"
                                 />
                             </div>
                         )}
