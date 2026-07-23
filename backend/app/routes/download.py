@@ -18,7 +18,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 
 from app.auth_deps import guest_or_admin
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from app.database import supabase
 from app.services.drive_service import download_file_to_memory
@@ -301,4 +301,125 @@ async def stream_zip(
         str(zip_file),
         media_type="application/zip",
         filename=f"{guest_name}_wedding_photos.zip",
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Streaming download (memory-flat, no /tmp)
+#
+# The prepare/build/poll/stream flow above builds the whole archive in
+# LOCAL_CACHE_DIR/zips first. On Cloud Run that path is /tmp, which is RAM, so a
+# large album's ZIP (plus every original, which download_file_to_memory also
+# caches to /tmp) blew the 512 MiB container and the build silently OOM-died —
+# the session sat at "processing" forever. This endpoint instead streams each
+# file from Drive straight into the ZIP entry in chunks and flushes to the
+# client, so memory stays flat (one chunk) no matter how big the album is.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _drive_bearer_token() -> str:
+    """Service-account access token for Drive media (same source as the stream route)."""
+    import os
+    import json
+    from google.oauth2 import service_account
+    import google_auth_httplib2
+    import httplib2
+
+    content = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_CONTENT")
+    if content:
+        info = json.loads(content.strip())
+        creds = service_account.Credentials.from_service_account_info(
+            info, scopes=["https://www.googleapis.com/auth/drive"]
+        )
+    else:
+        from app.config import settings
+        creds = service_account.Credentials.from_service_account_file(
+            settings.GOOGLE_SERVICE_ACCOUNT_JSON,
+            scopes=["https://www.googleapis.com/auth/drive"],
+        )
+    creds.refresh(google_auth_httplib2.Request(httplib2.Http()))
+    return creds.token
+
+
+class _ZipSink:
+    """Unseekable sink ZipFile writes into; we hand the bytes to the client and
+    drop them, so neither the whole archive nor a whole file is ever retained."""
+
+    def __init__(self):
+        self._parts = []
+
+    def write(self, data) -> int:
+        self._parts.append(bytes(data))
+        return len(data)
+
+    def flush(self) -> None:
+        pass
+
+    def drain(self) -> bytes:
+        if not self._parts:
+            return b""
+        out = b"".join(self._parts)
+        self._parts.clear()
+        return out
+
+
+@router.get("/{guest_id}/all")
+def download_all_streaming(guest_id: str, caller: dict = Depends(guest_or_admin)):
+    """Stream the guest's whole album as a ZIP, generated on the fly.
+
+    ZIP_STORED (no deflate): photos and videos are already compressed, so
+    re-compressing only burns CPU. Files stream from Drive in 256 KB chunks
+    straight into the archive, which streams to the client — flat memory.
+    """
+    if not caller.get("is_admin") and caller.get("id") != guest_id:
+        raise HTTPException(status_code=403, detail="This link cannot download that album.")
+    guest = supabase.table("guests").select("name").eq("id", guest_id).execute()
+    if not guest.data:
+        raise HTTPException(status_code=404, detail="Guest not found")
+
+    rows = _collect_rows(guest_id)
+    from app.routes.photos import get_drive_id_to_mime_map
+    mime_map = get_drive_id_to_mime_map()
+
+    def _entry_name(drive_id, is_common, index):
+        mime = mime_map.get(drive_id, "image/jpeg")
+        ext = _MIME_EXT.get(mime, ".mp4" if mime.startswith("video/") else ".jpg")
+        folder = "Common Photos" if is_common else "My Photos"
+        return f"{folder}/{drive_id}_{index}{ext}"
+
+    def generate():
+        import httpx
+        token = _drive_bearer_token()
+        sink = _ZipSink()
+        ok = 0
+        with httpx.Client(timeout=httpx.Timeout(30.0, read=300.0)) as client, \
+                zipfile.ZipFile(sink, "w", zipfile.ZIP_STORED, allowZip64=True) as zf:
+            for drive_id, is_common, index in rows:
+                url = f"https://www.googleapis.com/drive/v3/files/{drive_id}?alt=media"
+                try:
+                    with client.stream("GET", url, headers={"Authorization": f"Bearer {token}"}) as r:
+                        if r.status_code != 200:
+                            log.warning(f"download-all: skip {drive_id}, drive {r.status_code}")
+                            continue
+                        with zf.open(_entry_name(drive_id, is_common, index), "w") as entry:
+                            for chunk in r.iter_bytes(256 * 1024):
+                                entry.write(chunk)
+                                out = sink.drain()
+                                if out:
+                                    yield out
+                    ok += 1
+                except Exception as e:
+                    log.error(f"download-all: failed {drive_id}: {e}")
+                out = sink.drain()
+                if out:
+                    yield out
+        tail = sink.drain()
+        if tail:
+            yield tail
+        log.info(f"download-all {guest_id}: streamed {ok}/{len(rows)} files")
+
+    safe = "".join(c for c in guest.data[0]["name"] if c.isalnum() or c in " _-").strip().replace(" ", "_") or "wedding"
+    return StreamingResponse(
+        generate(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{safe}_wedding_photos.zip"'},
     )
