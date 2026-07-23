@@ -355,9 +355,18 @@ async def stream_photo(
                 raise
 
             response_headers = headers.copy()
-            for h in ["Content-Range", "Content-Length", "Accept-Ranges"]:
+            for h in ["Content-Range", "Accept-Ranges"]:
                 if h in resp.headers:
                     response_headers[h] = resp.headers[h]
+            # Forward Content-Length ONLY for a partial (206) response. On a full
+            # 200, a known Content-Length makes Cloud Run treat the body as fixed
+            # and buffer it to enforce its ~32 MiB response cap — so a full-size
+            # photo 500'd ("Response size was too large"), which is why original-
+            # quality preview never loaded. Omitting it sends the body chunked,
+            # which streams with no size limit. Range requests (206, used by the
+            # video player) keep their Content-Length and are unaffected.
+            if resp.status_code == 206 and "Content-Length" in resp.headers:
+                response_headers["Content-Length"] = resp.headers["Content-Length"]
 
             async def _iter_and_close():
                 try:
@@ -685,12 +694,28 @@ def get_people_in_photo(drive_id: str):
     return results
 
 
+def _apply_media(query, column: str, media: str):
+    """Narrow a query to photos-only or videos-only by filename extension.
+
+    Only .mp4 videos exist in this album (verified), so a single case-insensitive
+    match is enough and avoids a brittle multi-term or_. `column` is "filename"
+    for a direct photos query or "photos.filename" for the guest_photos join.
+    """
+    m = (media or "all").lower()
+    if m == "videos":
+        return query.ilike(column, "*.mp4")
+    if m == "photos":
+        return query.not_.ilike(column, "*.mp4")
+    return query
+
+
 @router.get("/{guest_id}")
 async def get_guest_photos(
     guest_id: str,
     page: int = 1,
     limit: int = 50,
     filter: str = "all",
+    media: str = "all",
     caller: dict = Depends(guest_or_admin),
 ):
     """
@@ -751,9 +776,17 @@ async def get_guest_photos(
 
     if want == "common":
         # Everyone sees these, so guest_photos need not be involved at all.
-        count_res = supabase.table("photos").select("id", count="exact").eq("is_common", True).execute()
-        total_count = count_res.count or 0
-        result = supabase.table("photos").select("drive_path, is_common, face_count")            .eq("is_common", True)            .order("created_at", desc=True).order("id", desc=True)            .range(offset, offset + limit - 1)            .execute()
+        count_q = supabase.table("photos").select("id", count="exact").eq("is_common", True)
+        total_count = _apply_media(count_q, "filename", media).execute().count or 0
+        data_q = (
+            supabase.table("photos")
+            .select("drive_path, is_common, face_count")
+            .eq("is_common", True)
+            .order("created_at", desc=True)
+            .order("id", desc=True)
+            .range(offset, offset + limit - 1)
+        )
+        result = _apply_media(data_q, "filename", media).execute()
 
     elif want == "mine" and personal_count:
         # "Just Me" = every photo this guest is IN — solo shots AND group shots
@@ -773,16 +806,24 @@ async def get_guest_photos(
         # non-unique column alone makes each page's range non-deterministic, so
         # pages overlap and drop rows. (created_at + photo_id) is a total order,
         # so pagination is stable.
-        total_count = personal_count
-        rows = (
+        if (media or "all").lower() == "all":
+            total_count = personal_count
+        else:
+            count_q = (
+                supabase.table("guest_photos")
+                .select("photos!inner(id)", count="exact")
+                .eq("guest_id", guest_id)
+            )
+            total_count = _apply_media(count_q, "photos.filename", media).execute().count or 0
+        rows_q = (
             supabase.table("guest_photos")
             .select("photo_id, photos!inner(drive_path, is_common, face_count, created_at)")
             .eq("guest_id", guest_id)
             .order("created_at", desc=True, foreign_table="photos")
             .order("photo_id", desc=True)
             .range(offset, offset + limit - 1)
-            .execute()
         )
+        rows = _apply_media(rows_q, "photos.filename", media).execute()
         result = _Rows([r["photos"] for r in rows.data if r.get("photos")])
 
     elif personal_count:
@@ -795,18 +836,22 @@ async def get_guest_photos(
         # them here. Personal photos come through the guest_photos join, exactly
         # like the "mine" branch, so their ids never touch the URL.
         common_rows = fetch_all(
-            lambda a, b: supabase.table("photos")
-            .select("drive_path, is_common, face_count, created_at")
-            .eq("is_common", True)
-            .range(a, b)
+            lambda a, b: _apply_media(
+                supabase.table("photos")
+                .select("drive_path, is_common, face_count, created_at")
+                .eq("is_common", True),
+                "filename", media,
+            ).range(a, b)
         )
         personal_rows = [
             r["photos"]
             for r in fetch_all(
-                lambda a, b: supabase.table("guest_photos")
-                .select("photos!inner(drive_path, is_common, face_count, created_at)")
-                .eq("guest_id", guest_id)
-                .range(a, b)
+                lambda a, b: _apply_media(
+                    supabase.table("guest_photos")
+                    .select("photos!inner(drive_path, is_common, face_count, created_at)")
+                    .eq("guest_id", guest_id),
+                    "photos.filename", media,
+                ).range(a, b)
             )
             if r.get("photos")
         ]
@@ -830,15 +875,18 @@ async def get_guest_photos(
         result = _Rows(ordered[offset : offset + limit])
 
     else:
-        count_res = supabase.table("photos").select("id", count="exact").eq("is_common", True).execute()
-        total_count = count_res.count or 0
-        
-        result = supabase.table("photos").select("drive_path, is_common, face_count")\
-            .eq("is_common", True)\
-            .order("created_at", desc=True)\
-            .order("id", desc=True)\
-            .range(offset, offset + limit - 1)\
-            .execute()
+        count_q = supabase.table("photos").select("id", count="exact").eq("is_common", True)
+        total_count = _apply_media(count_q, "filename", media).execute().count or 0
+
+        data_q = (
+            supabase.table("photos")
+            .select("drive_path, is_common, face_count")
+            .eq("is_common", True)
+            .order("created_at", desc=True)
+            .order("id", desc=True)
+            .range(offset, offset + limit - 1)
+        )
+        result = _apply_media(data_q, "filename", media).execute()
 
     # 3. Fetch family members registered under this guest/household
     try:
