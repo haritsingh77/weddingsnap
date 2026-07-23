@@ -722,17 +722,18 @@ async def get_guest_photos(
     # completely empty.
     from app.services.db_paging import fetch_all
 
-    # Paged: unpaged this capped at 1000, so a guest with more than that
-    # silently lost the rest of their album.
-    personal_ids = [
-        str(r["photo_id"])
-        for r in fetch_all(
-            lambda a, b: supabase.table("guest_photos")
-            .select("photo_id")
-            .eq("guest_id", guest_id)
-            .range(a, b)
-        )
-    ]
+    # How many photos this guest is in. A cheap count (no rows returned) that
+    # replaces the old "fetch every personal id on every request" — that pulled
+    # thousands of ids even for the Group Moments tab, which never needs them,
+    # and was a big part of why the gallery felt slow.
+    personal_count = (
+        supabase.table("guest_photos")
+        .select("photo_id", count="exact")
+        .eq("guest_id", guest_id)
+        .limit(1)
+        .execute()
+        .count
+    ) or 0
 
     want = (filter or "all").lower()
 
@@ -744,32 +745,41 @@ async def get_guest_photos(
         # Everyone sees these, so guest_photos need not be involved at all.
         count_res = supabase.table("photos").select("id", count="exact").eq("is_common", True).execute()
         total_count = count_res.count or 0
-        result = supabase.table("photos").select("drive_path, is_common, face_count")            .eq("is_common", True)            .order("created_at", desc=True)            .range(offset, offset + limit - 1)            .execute()
+        result = supabase.table("photos").select("drive_path, is_common, face_count")            .eq("is_common", True)            .order("created_at", desc=True).order("id", desc=True)            .range(offset, offset + limit - 1)            .execute()
 
-    elif want == "mine" and personal_ids:
-        # "Just Me" = every photo this guest is IN, which is exactly their
-        # guest_photos rows — solo shots AND group shots they were matched or
-        # manually assigned to. A group photo she is in shows here and in Group
-        # Moments both, which is correct: it is a photo of her and a group
-        # moment. Filtering these to is_common=False (an earlier attempt) hid
-        # the group photos she is actually in — 292 of them for one guest — and
-        # it is also what makes admin "assign to this person" work, since an
-        # assigned photo just becomes another guest_photos row.
+    elif want == "mine" and personal_count:
+        # "Just Me" = every photo this guest is IN — solo shots AND group shots
+        # they were matched or manually assigned to. A group photo she is in
+        # shows here and in Group Moments both, which is correct: it is a photo
+        # of her and a group moment. (Filtering these to is_common=False, an
+        # earlier attempt, hid the group photos she is actually in.)
         #
-        # Read through guest_photos so the id list stays inside the join; 1,900
-        # ids in an .in_() filter would exceed the URL length limit.
-        rows = fetch_all(
-            lambda a, b: supabase.table("guest_photos")
-            .select("photos!inner(drive_path, is_common, face_count)")
+        # Paginate the guest_photos -> photos join directly, newest first, so a
+        # page is 50 rows instead of the whole album — this used to fetch every
+        # one of her thousands of photos just to return one page. The ids stay
+        # inside the join (never in the URL), and ordering is by the embedded
+        # photos.created_at.
+        # Order by the photo date (newest first), then by guest_photos.photo_id
+        # as a tiebreaker. The tiebreaker is essential, not cosmetic: thousands
+        # of photos share an identical imported created_at, and ordering by a
+        # non-unique column alone makes each page's range non-deterministic, so
+        # pages overlap and drop rows. (created_at + photo_id) is a total order,
+        # so pagination is stable.
+        total_count = personal_count
+        rows = (
+            supabase.table("guest_photos")
+            .select("photo_id, photos!inner(drive_path, is_common, face_count, created_at)")
             .eq("guest_id", guest_id)
-            .range(a, b)
+            .order("created_at", desc=True, foreign_table="photos")
+            .order("photo_id", desc=True)
+            .range(offset, offset + limit - 1)
+            .execute()
         )
-        flat = [r["photos"] for r in rows if r.get("photos")]
-        total_count = len(flat)
-        result = _Rows(flat[offset : offset + limit])
+        result = _Rows([r["photos"] for r in rows.data if r.get("photos")])
 
-    elif personal_ids:
-        # "All Moments" = every group photo plus every photo this guest is in.
+    elif personal_count:
+        # "All Moments" (admin-only view) = every group photo plus every photo
+        # this guest is in.
         # The obvious query — .or_("is_common.eq.true,id.in.(<personal ids>)") —
         # puts every personal id in the URL, and past ~4,000 of them (the bride)
         # that URL exceeds the length limit and the whole request 500s. So read
@@ -800,9 +810,12 @@ async def get_guest_photos(
                 merged[dp] = p
         # Newest first, matching the created_at desc ordering this branch used
         # back when it was a single query.
+        # created_at is non-unique (bulk import shares timestamps), so add
+        # drive_path as a tiebreaker — otherwise the slice boundary between
+        # pages is non-deterministic and pages overlap.
         ordered = sorted(
             merged.values(),
-            key=lambda p: p.get("created_at") or "",
+            key=lambda p: (p.get("created_at") or "", p.get("drive_path") or ""),
             reverse=True,
         )
         total_count = len(ordered)
@@ -815,6 +828,7 @@ async def get_guest_photos(
         result = supabase.table("photos").select("drive_path, is_common, face_count")\
             .eq("is_common", True)\
             .order("created_at", desc=True)\
+            .order("id", desc=True)\
             .range(offset, offset + limit - 1)\
             .execute()
 
