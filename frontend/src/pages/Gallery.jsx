@@ -1741,8 +1741,8 @@ export default function Gallery() {
                                 className="object-contain max-w-full max-h-[75vh] md:max-h-[80vh] rounded-lg shadow-2xl"
                             />
                         ) : (
-                            <img 
-                                src={withToken(`${API_BASE}/photos/stream/${activePhoto.drive_id}`)}
+                            <img
+                                src={withToken(`${API_BASE}${activePhoto.thumb_url}`)}
                                 alt=""
                                 onLoad={() => setMediaLoading(false)}
                                 onError={(e) => console.error("Image load error for ID " + activePhoto.drive_id + ":", e)}
