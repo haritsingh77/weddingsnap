@@ -289,9 +289,17 @@ async def stream_photo(
         headers["Content-Disposition"] = f'attachment; filename="{filename}"'
 
     if not original_path.exists():
-        # Start a background task to download the file to the local cache folder
-        background_tasks.add_task(download_to_local_cache_task, file_id, original_path)
-        
+        # Cache the original to local disk for next time — but ONLY where there is
+        # real disk. On Cloud Run CACHE_DIR is /tmp, which is RAM: this task calls
+        # download_file_to_memory(), pulling the whole file (a video can be
+        # hundreds of MB) into the small container and OOM-killing it mid-request.
+        # That is exactly what made the full-size preview "load forever" — the
+        # container died before the stream finished. Skip caching unless a real
+        # SSD root is configured (local dev / an Oracle VM), where it's a win.
+        import os
+        if os.getenv("WEDDINGSNAP_SSD_ROOT", "").strip():
+            background_tasks.add_task(download_to_local_cache_task, file_id, original_path)
+
         # Immediately stream directly from Google Drive — fully async so a
         # large video stream never blocks the event loop for other requests.
         log.info(f"Streaming {file_id} directly from Google Drive (not cached yet)...")
