@@ -329,7 +329,7 @@ export default function Gallery() {
             // already returns.
             const res = (tab === 'all' && isAdmin)
                 ? await getAllPhotos(p)
-                : await getPhotos(guestId, p)
+                : await getPhotos(guestId, p, tab === 'mine' || tab === 'common' ? tab : 'all')
             const { photos: newPhotos, has_more, total: totalPhotos, family_members: fetchedFamilyMembers } = res.data
             if (fetchedFamilyMembers) {
                 setFamilyMembers(fetchedFamilyMembers)
@@ -412,8 +412,8 @@ export default function Gallery() {
             if (activeFamilyMemberId) {
                 return p.member_ids && p.member_ids.includes(activeFamilyMemberId)
             }
-            if (tab === 'mine') return !p.is_common
-            if (tab === 'common') return p.is_common
+            // The server already applied the tab filter, so re-applying it
+            // here would only hide rows it deliberately returned.
             return true
         })
 

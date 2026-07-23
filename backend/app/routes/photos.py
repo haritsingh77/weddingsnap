@@ -682,6 +682,7 @@ async def get_guest_photos(
     guest_id: str,
     page: int = 1,
     limit: int = 50,
+    filter: str = "all",
     caller: dict = Depends(guest_or_admin),
 ):
     """
@@ -713,21 +714,59 @@ async def get_guest_photos(
 
     offset = (page - 1) * limit
 
-    # 1. Fetch personal photo IDs from guest_photos mapping table (aggregate family album)
-    gp_res = supabase.table("guest_photos").select("photo_id").eq("guest_id", guest_id).execute()
-    personal_ids = [str(row["photo_id"]) for row in gp_res.data] if (gp_res.data and len(gp_res.data) > 0) else []
+    # `filter` decides which tab is being shown, and it MUST be applied here
+    # rather than in the browser. The gallery fetched a page of 50 mixed photos
+    # and filtered them client-side, so "Just Me" showed only the personal
+    # photos that happened to fall in that page — for a guest with 1,316
+    # personal photos the newest 50 were all group shots, so the tab looked
+    # completely empty.
+    from app.services.db_paging import fetch_all
 
-    # 2. Query photos table where is_common is true OR photo_id is in personal_ids
-    if personal_ids:
+    # Paged: unpaged this capped at 1000, so a guest with more than that
+    # silently lost the rest of their album.
+    personal_ids = [
+        str(r["photo_id"])
+        for r in fetch_all(
+            lambda a, b: supabase.table("guest_photos")
+            .select("photo_id")
+            .eq("guest_id", guest_id)
+            .range(a, b)
+        )
+    ]
+
+    want = (filter or "all").lower()
+
+    class _Rows:
+        def __init__(self, data):
+            self.data = data
+
+    if want == "common":
+        # Everyone sees these, so guest_photos need not be involved at all.
+        count_res = supabase.table("photos").select("id", count="exact").eq("is_common", True).execute()
+        total_count = count_res.count or 0
+        result = supabase.table("photos").select("drive_path, is_common, face_count")            .eq("is_common", True)            .order("created_at", desc=True)            .range(offset, offset + limit - 1)            .execute()
+
+    elif want == "mine" and personal_ids:
+        # This guest's own photos, excluding group shots. Read through
+        # guest_photos so the id list stays inside the join — 1,600 ids in an
+        # .in_() filter would exceed the URL length limit.
+        rows = fetch_all(
+            lambda a, b: supabase.table("guest_photos")
+            .select("photos!inner(drive_path, is_common, face_count)")
+            .eq("guest_id", guest_id)
+            .eq("photos.is_common", False)
+            .range(a, b)
+        )
+        flat = [r["photos"] for r in rows if r.get("photos")]
+        total_count = len(flat)
+        result = _Rows(flat[offset : offset + limit])
+
+    elif personal_ids:
         or_filter = f"is_common.eq.true,id.in.({','.join(personal_ids)})"
         count_res = supabase.table("photos").select("id", count="exact").or_(or_filter).execute()
         total_count = count_res.count or 0
-        
-        result = supabase.table("photos").select("drive_path, is_common, face_count")\
-            .or_(or_filter)\
-            .order("created_at", desc=True)\
-            .range(offset, offset + limit - 1)\
-            .execute()
+        result = supabase.table("photos").select("drive_path, is_common, face_count")            .or_(or_filter)            .order("created_at", desc=True)            .range(offset, offset + limit - 1)            .execute()
+
     else:
         count_res = supabase.table("photos").select("id", count="exact").eq("is_common", True).execute()
         total_count = count_res.count or 0
