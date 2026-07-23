@@ -393,6 +393,75 @@ async def stream_photo(
     )
 
 
+@router.get("/preview/{file_id}")
+def preview_photo(file_id: str):
+    """Screen-sized (~1600px) preview for the lightbox.
+
+    Displaying the 13 MB / 6048px original on a ~1080px screen ships ~30x more
+    data than the screen can show and takes ~5s through Cloud Run. This returns a
+    1600px JPEG (~400 KB, visually identical on screen) and caches it to the same
+    CDN as the 400px thumbnails, so the first view generates it once and every
+    later view is an instant CDN redirect. The true original stays available for
+    download via /photos/stream?download=true.
+    """
+    from fastapi.responses import RedirectResponse, Response
+    cache_key = f"thumb_{file_id}_1600.jpg"
+    base = f"{settings.SUPABASE_URL}/storage/v1/object/public/weddingsnap-cache"
+    cdn_url = f"{base}/{cache_key}"
+    thumb_400 = f"{base}/thumb_{file_id}_400.jpg"
+
+    # 1. Already generated? Serve the cached copy from the CDN (fast path).
+    try:
+        import httpx
+        if httpx.head(cdn_url, timeout=3.0).status_code == 200:
+            return RedirectResponse(url=cdn_url, status_code=307)
+    except Exception:
+        pass
+
+    # 2. Generate once: pull the original into memory (never to /tmp, which is
+    #    RAM on Cloud Run), downscale, cache to the CDN, and return it.
+    try:
+        from app.services.drive_service import get_drive_service
+        from googleapiclient.http import MediaIoBaseDownload
+        from PIL import Image, ImageOps
+        import io
+
+        service = get_drive_service()
+        request = service.files().get_media(fileId=file_id)
+        buf = io.BytesIO()
+        downloader = MediaIoBaseDownload(buf, request)
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+        buf.seek(0)
+
+        img = Image.open(buf)
+        img = ImageOps.exif_transpose(img)
+        img.thumbnail((1600, 1600))
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+        out = io.BytesIO()
+        img.save(out, format="JPEG", quality=85, optimize=True)
+        data = out.getvalue()
+
+        try:
+            from app.services.drive_cache import save_cached_file
+            save_cached_file(cache_key, data, mime_type="image/jpeg")
+        except Exception as cache_err:
+            log.debug(f"preview cache upload failed for {file_id}: {cache_err}")
+
+        return Response(
+            content=data,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "private, max-age=86400"},
+        )
+    except Exception as e:
+        # A video, or an original that can't be decoded/downloaded — fall back to
+        # the 400px thumbnail so the lightbox always shows something.
+        log.warning(f"preview generation failed for {file_id}: {e}")
+        return RedirectResponse(url=thumb_400, status_code=307)
+
+
 class CreateCategoryBody(BaseModel):
     name: str
 
