@@ -354,19 +354,19 @@ async def stream_photo(
                 await client.aclose()
                 raise
 
+            # Never forward Content-Length. Cloud Run enforces a ~32 MiB cap by
+            # BUFFERING any response whose length it knows up front, then 500s if
+            # it's bigger ("Response size was too large"). A 15 MB photo tripped
+            # this, and so did video: the player's opening `Range: bytes=0-`
+            # returns a 206 whose Content-Length is the WHOLE file (a clip here is
+            # 1.36 GB), which 500'd and stopped playback dead. Dropping
+            # Content-Length makes every response stream chunked with no cap;
+            # Content-Range still carries the total size the player needs to seek,
+            # and the player closes the connection once it has buffered enough.
             response_headers = headers.copy()
             for h in ["Content-Range", "Accept-Ranges"]:
                 if h in resp.headers:
                     response_headers[h] = resp.headers[h]
-            # Forward Content-Length ONLY for a partial (206) response. On a full
-            # 200, a known Content-Length makes Cloud Run treat the body as fixed
-            # and buffer it to enforce its ~32 MiB response cap — so a full-size
-            # photo 500'd ("Response size was too large"), which is why original-
-            # quality preview never loaded. Omitting it sends the body chunked,
-            # which streams with no size limit. Range requests (206, used by the
-            # video player) keep their Content-Length and are unaffected.
-            if resp.status_code == 206 and "Content-Length" in resp.headers:
-                response_headers["Content-Length"] = resp.headers["Content-Length"]
 
             async def _iter_and_close():
                 try:
