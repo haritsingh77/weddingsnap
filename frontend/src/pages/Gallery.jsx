@@ -258,6 +258,9 @@ export default function Gallery() {
     // "All Moments" is the whole-wedding view and is admin-only, so guests land
     // on their own "Just Me". Admins keep All Moments as the default.
     const [tab, setTab] = useState(isAdmin ? 'all' : 'mine')  // all | mine | common | people
+    // Photos vs Videos within a tab. Default to photos so the newest clips never
+    // lead the gallery; the switch appears on the Just Me / Group Moments tabs.
+    const [mediaFilter, setMediaFilter] = useState('photos')  // photos | videos
     // The guest's OWN matched count, independent of the active tab. The header
     // must never show the "All Moments" total (that's every file in the Drive,
     // not photos matched to this guest).
@@ -340,9 +343,10 @@ export default function Gallery() {
             // A guest's "All Moments" is their own album — their matched photos
             // plus everything flagged common — which is what /photos/{id}
             // already returns.
+            const mediaTabs = tab === 'mine' || tab === 'common'
             const res = (tab === 'all' && isAdmin)
                 ? await getAllPhotos(p)
-                : await getPhotos(guestId, p, tab === 'mine' || tab === 'common' ? tab : 'all')
+                : await getPhotos(guestId, p, mediaTabs ? tab : 'all', mediaTabs ? mediaFilter : 'all')
             const { photos: newPhotos, has_more, total: totalPhotos, family_members: fetchedFamilyMembers } = res.data
             if (fetchedFamilyMembers) {
                 setFamilyMembers(fetchedFamilyMembers)
@@ -376,7 +380,7 @@ export default function Gallery() {
         } finally {
             setLoading(false)
         }
-    }, [guestId, navigate, tab])
+    }, [guestId, navigate, tab, mediaFilter])
 
     // Fetch the guest's own matched count once on mount, so the header is
     // accurate even when they land on the "All Moments" tab.
@@ -399,7 +403,7 @@ export default function Gallery() {
         setPhotos([])
         setPage(1)
         fetchPhotos(1)
-    }, [guestId, tab, navigate]) // eslint-disable-line react-hooks/exhaustive-deps
+    }, [guestId, tab, mediaFilter, navigate]) // eslint-disable-line react-hooks/exhaustive-deps
 
     // Infinite Scroll helper
     useEffect(() => {
@@ -1263,6 +1267,23 @@ export default function Gallery() {
                                             ? `${total.toLocaleString()} moments in the full gallery`
                                             : `${filtered.length} ${filtered.length === 1 ? 'moment' : 'moments'} shown`}
                                     </p>
+                                    {(tab === 'mine' || tab === 'common') && (
+                                        <div className="mt-3 inline-flex items-center gap-0.5 rounded-full bg-ivory-100 border border-gold-200/60 p-0.5 shadow-xs">
+                                            {['photos', 'videos'].map(m => (
+                                                <button
+                                                    key={m}
+                                                    onClick={() => setMediaFilter(m)}
+                                                    className={`px-5 py-1.5 text-xs font-semibold uppercase tracking-wide rounded-full transition-all duration-300 cursor-pointer ${
+                                                        mediaFilter === m
+                                                            ? 'bg-taupe-800 text-white shadow-sm'
+                                                            : 'text-taupe-400 hover:text-taupe-700'
+                                                    }`}
+                                                >
+                                                    {m === 'photos' ? 'Photos' : 'Videos'}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                                 
                                 {/* Action Buttons: Multi-Select Mode toggle */}
@@ -1741,13 +1762,27 @@ export default function Gallery() {
                                 className="object-contain max-w-full max-h-[75vh] md:max-h-[80vh] rounded-lg shadow-2xl"
                             />
                         ) : (
-                            <img
-                                src={withToken(`${API_BASE}${activePhoto.thumb_url}`)}
-                                alt=""
-                                onLoad={() => setMediaLoading(false)}
-                                onError={(e) => console.error("Image load error for ID " + activePhoto.drive_id + ":", e)}
-                                className="object-contain max-w-full max-h-[75vh] md:max-h-[80vh] rounded-lg shadow-2xl"
-                            />
+                            <div key={activePhoto.drive_id} className="relative inline-block">
+                                {/* Instant low-res placeholder — loads from the CDN, defines
+                                    the frame size, and is what shows through if the full-size
+                                    original can't be streamed. */}
+                                <img
+                                    src={withToken(`${API_BASE}${activePhoto.thumb_url}`)}
+                                    alt=""
+                                    aria-hidden="true"
+                                    onLoad={() => setMediaLoading(false)}
+                                    className="object-contain max-w-full max-h-[75vh] md:max-h-[80vh] rounded-lg shadow-2xl"
+                                />
+                                {/* Full-resolution original, fades in over the placeholder. */}
+                                <img
+                                    src={withToken(`${API_BASE}/photos/stream/${activePhoto.drive_id}`)}
+                                    alt=""
+                                    onLoad={(e) => { e.currentTarget.style.opacity = 1; setMediaLoading(false) }}
+                                    onError={(e) => { e.currentTarget.style.display = 'none' }}
+                                    style={{ opacity: 0, transition: 'opacity 0.5s ease' }}
+                                    className="absolute inset-0 w-full h-full object-contain rounded-lg shadow-2xl"
+                                />
+                            </div>
                         )}
                         
                         {/* Caption & Download bar */}

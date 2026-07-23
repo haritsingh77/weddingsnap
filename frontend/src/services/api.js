@@ -49,8 +49,8 @@ export const verifyInvite = (code, name, phone) =>
 // `filter` is applied server-side. Filtering the returned page in the browser
 // showed only whatever matched within those 50 rows — for a guest with 1,316
 // personal photos the newest 50 were all group shots, so "Just Me" was empty.
-export const getPhotos = (guestId, page = 1, filter = 'all') =>
-  api.get(`/photos/${guestId}?page=${page}&limit=50&filter=${filter}`)
+export const getPhotos = (guestId, page = 1, filter = 'all', media = 'all') =>
+  api.get(`/photos/${guestId}?page=${page}&limit=50&filter=${filter}&media=${media}`)
 
 export const getAllPhotos = (page = 1) =>
   api.get(`/photos/all?page=${page}&limit=50`)
