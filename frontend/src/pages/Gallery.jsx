@@ -1745,10 +1745,12 @@ export default function Gallery() {
                         className="relative max-w-full max-h-[80vh] md:max-h-[85vh] flex flex-col items-center min-w-[280px] sm:min-w-[400px] min-h-[300px] justify-center"
                         onClick={(e) => e.stopPropagation()}
                     >
-                        {/* Elegant Loader inside Lightbox */}
+                        {/* Subtle "loading full quality" pill — the soft thumbnail is
+                            already visible underneath, so no full-screen spinner. */}
                         {mediaLoading && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-taupe-900/10 backdrop-blur-xs rounded-lg z-10 min-h-[300px]">
-                                <div className="w-10 h-10 border-3 border-gold-300/20 border-t-gold-400 rounded-full animate-spin"></div>
+                            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-taupe-900/55 text-white/90 text-[11px] font-medium px-3.5 py-1.5 rounded-full backdrop-blur-sm">
+                                <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                                {activePhoto.is_video ? 'Loading video…' : 'Loading full quality…'}
                             </div>
                         )}
 
@@ -1776,7 +1778,7 @@ export default function Gallery() {
                                     src={withToken(`${API_BASE}${activePhoto.thumb_url}`)}
                                     alt=""
                                     aria-hidden="true"
-                                    className="absolute inset-0 w-full h-full object-contain rounded-lg blur-md scale-105 opacity-60"
+                                    className="absolute inset-0 w-full h-full object-contain rounded-lg blur-[2px] scale-[1.02]"
                                 />
                                 <img
                                     src={withToken(`${API_BASE}/photos/stream/${activePhoto.drive_id}`)}
