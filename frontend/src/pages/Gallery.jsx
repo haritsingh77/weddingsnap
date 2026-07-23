@@ -1781,7 +1781,7 @@ export default function Gallery() {
                                     className="absolute inset-0 w-full h-full object-contain rounded-lg blur-[2px] scale-[1.02]"
                                 />
                                 <img
-                                    src={withToken(`${API_BASE}/photos/stream/${activePhoto.drive_id}`)}
+                                    src={withToken(`${API_BASE}/photos/preview/${activePhoto.drive_id}`)}
                                     alt=""
                                     onLoad={(e) => { e.currentTarget.style.opacity = 1; setMediaLoading(false) }}
                                     onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = withToken(`${API_BASE}${activePhoto.thumb_url}`); e.currentTarget.style.opacity = 1; setMediaLoading(false) }}
