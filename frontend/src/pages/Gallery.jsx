@@ -1843,8 +1843,9 @@ export default function Gallery() {
                             </div>
                         </div>
                         )}
-                        {/* People in this photo */}
-                        {(loadingPeople || photoPeople.length > 0) && (
+                        {/* People in this photo — only once the preview has loaded, so the
+                            skeleton doesn't flash mid-screen during the wait. */}
+                        {!mediaLoading && (loadingPeople || photoPeople.length > 0) && (
                             <div className="w-full mt-3 px-2" onClick={e => e.stopPropagation()}>
                                 <p className="text-[9px] uppercase tracking-widest text-white/30 font-semibold mb-2">
                                     People in this photo
@@ -2101,8 +2102,9 @@ export default function Gallery() {
             )}
 
             {/* FLOATING SELECTION CONTROLS AND BATCH TOOLBAR */}
-            {/* Floating circular Select Mode FAB */}
-            {!isMultiSelectMode && (tab === 'all' || tab === 'mine' || tab === 'common' || selectedCluster || selectedCategory) && (
+            {/* Floating circular Select Mode FAB — hidden while the lightbox is open
+                so it doesn't overlap the preview's bottom-right controls. */}
+            {!isMultiSelectMode && lightboxIndex === null && (tab === 'all' || tab === 'mine' || tab === 'common' || selectedCluster || selectedCategory) && (
                 <button
                     onClick={() => setIsMultiSelectMode(true)}
                     className="fixed bottom-6 right-6 bg-taupe-800 text-white shadow-xl hover:shadow-2xl rounded-full w-14 h-14 flex items-center justify-center cursor-pointer transition-all duration-300 hover:scale-110 active:scale-95 group hover:bg-gold-550"
