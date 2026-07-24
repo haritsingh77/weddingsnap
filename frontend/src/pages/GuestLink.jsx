@@ -35,6 +35,9 @@ export default function GuestLink() {
                 localStorage.setItem('guest_name', data.name)
                 localStorage.setItem('event_name', data.event_name || '')
                 localStorage.setItem('is_household', data.is_household ? '1' : '')
+                // Admin guests (the couple / family) get the admin tools from
+                // their own link — the backend authorises their token as admin.
+                localStorage.setItem('is_admin_guest', data.is_admin ? '1' : '')
                 localStorage.setItem('household_members', JSON.stringify(data.members || []))
 
                 navigate('/gallery', { replace: true })
