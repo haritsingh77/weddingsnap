@@ -192,6 +192,7 @@ class LinkResponse(BaseModel):
     guest_id: str
     name: str
     is_household: bool
+    is_admin: bool = False
     event_name: str
     members: list = []
 
@@ -247,11 +248,13 @@ async def open_link(token: str):
         pass
 
     log.info("Link opened: %s (%s), %d member(s)", guest["name"], guest["id"], len(members))
+    from app.auth_deps import ADMIN_GUEST_IDS
     return LinkResponse(
         valid=True,
         guest_id=guest["id"],
         name=guest["name"],
         is_household=bool(guest.get("is_household")),
+        is_admin=guest["id"] in ADMIN_GUEST_IDS,
         event_name=event_name,
         members=members,
     )

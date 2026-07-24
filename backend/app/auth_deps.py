@@ -36,6 +36,15 @@ log = logging.getLogger(__name__)
 
 TOKEN_BYTES = 24  # ~32 url-safe chars
 
+# Guests who run the album (the couple / close family) are admins through their
+# OWN link — no separate password. Kept here rather than a guests.is_admin column
+# because there is no such column and DDL needs the DB password the app doesn't
+# have; edited + redeployed on the rare occasion the admin list changes.
+ADMIN_GUEST_IDS = {
+    "9feda9a4-aca6-477a-9880-6daa0bc64088",  # Mahima Singh
+    "e5020e8d-5fd2-424b-b02b-659fbb4586ad",  # Harit Singh
+}
+
 
 def new_access_token() -> str:
     return secrets.token_urlsafe(TOKEN_BYTES)
@@ -88,17 +97,28 @@ def require_guest(
 def require_admin(
     x_admin_password: str | None = Header(None, alias="x-admin-password"),
     password: str | None = Query(None),
+    x_guest_token: str | None = Header(None, alias="X-Guest-Token"),
+    tk: str | None = Query(None),
 ) -> bool:
     supplied = (x_admin_password or password or "").strip()
     expected = (settings.ADMIN_PASSWORD or "").strip()
+    if expected and supplied and secrets.compare_digest(supplied, expected):
+        return True
+
+    # An admin guest (the couple / family) is admin via their own link token —
+    # no password. The frontend already sends X-Guest-Token on every request.
+    token = (x_guest_token or tk or "").strip()
+    if token:
+        guest = _lookup(token)
+        if guest and guest.get("id") in ADMIN_GUEST_IDS:
+            return True
+
     if not expected:
         # Refuse rather than fall open — an unset password must not mean
         # "everyone is admin".
         log.error("ADMIN_PASSWORD is not set; refusing admin request")
         raise HTTPException(status_code=503, detail="Admin access is not configured.")
-    if not supplied or not secrets.compare_digest(supplied, expected):
-        raise HTTPException(status_code=403, detail="Admin access required.")
-    return True
+    raise HTTPException(status_code=403, detail="Admin access required.")
 
 
 def guest_or_admin(
@@ -118,5 +138,5 @@ def guest_or_admin(
         return {"id": None, "name": "admin", "is_admin": True}
 
     guest = require_guest(x_guest_token, tk)
-    guest["is_admin"] = False
+    guest["is_admin"] = guest.get("id") in ADMIN_GUEST_IDS
     return guest
