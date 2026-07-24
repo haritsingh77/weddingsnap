@@ -714,7 +714,14 @@ def get_people_in_photo(drive_id: str):
     if not filename:
         return []
 
-    target_path = f"GoogleDrive/{filename}"
+    # Cluster records key photos as "GoogleDrive/<file_id>/<filename>" — the id
+    # sits in the middle because filenames are NOT unique on Drive. This built the
+    # legacy "GoogleDrive/<filename>" form, which no longer matches anything, so
+    # "People in this photo" silently returned an empty list for every photo.
+    # Accept the legacy form too, for records written before the id was carried.
+    from app.services.drive_paths import drive_record_path
+    target_path = drive_record_path(drive_id, filename)
+    legacy_path = f"GoogleDrive/{filename}"
 
     try:
         clusters = get_face_clusters()
@@ -736,7 +743,8 @@ def get_people_in_photo(drive_id: str):
     seen_ids: set = set()
 
     for cid, cdata in clusters.items():
-        if target_path not in cdata.get("photos", []):
+        cluster_photos = cdata.get("photos") or ()
+        if target_path not in cluster_photos and legacy_path not in cluster_photos:
             continue
         if cid in seen_ids:
             continue
