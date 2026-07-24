@@ -626,44 +626,62 @@ def associate_guest_by_name(guest_id: str, name: str) -> int:
     still can't tell them apart, so it declines to guess and logs instead —
     those guests get photos from selfie matching rather than by name.
     """
-    guest_name = name.strip().lower()
-    if not guest_name:
-        return 0
-
     from app.services.drive_cache import get_cached_json
     from app.database import supabase
+    from app.routes.faces import get_face_clusters
 
+    # Explicit guest -> cluster links come first. This is what makes a HOUSEHOLD
+    # work: one guest can be linked to several clusters (wife, husband, kids) and
+    # their album becomes the union of all of them. It is also unambiguous, unlike
+    # matching on the name, which cannot tell two guests called "Ravi Singh" apart.
+    cluster_ids: list[str] = []
     try:
-        escaped = name.strip().replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
-        same_name = (
-            supabase.table("guests").select("id").ilike("name", escaped).execute()
+        linked = (
+            supabase.table("guest_clusters")
+            .select("cluster_id")
+            .eq("guest_id", guest_id)
+            .execute()
         ).data or []
-        if len(same_name) > 1:
-            log.warning(
-                "Skipping name-association for %r — %d guests share this name, so "
-                "cluster photos cannot be attributed by name without mixing albums.",
-                name, len(same_name),
-            )
-            return 0
+        cluster_ids = [str(r["cluster_id"]) for r in linked]
     except Exception as e:
-        log.debug("Could not check for duplicate guest names: %s", e)
+        log.debug("guest_clusters lookup failed for %s: %s", guest_id, e)
 
-    names_data = get_cached_json("cluster_names.json")
-    if not names_data:
+    # Fall back to name matching only for a guest with no link at all.
+    if not cluster_ids:
+        guest_name = name.strip().lower()
+        if not guest_name:
+            return 0
+        try:
+            escaped = name.strip().replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
+            same_name = (
+                supabase.table("guests").select("id").ilike("name", escaped).execute()
+            ).data or []
+            if len(same_name) > 1:
+                log.warning(
+                    "Skipping name-association for %r — %d guests share this name, so "
+                    "cluster photos cannot be attributed by name without mixing albums.",
+                    name, len(same_name),
+                )
+                return 0
+        except Exception as e:
+            log.debug("Could not check for duplicate guest names: %s", e)
+
+        names_data = get_cached_json("cluster_names.json")
+        if not names_data:
+            return 0
+        cluster_ids = [
+            cid for cid, cname in names_data.items()
+            if isinstance(cname, str) and cname.strip().lower() == guest_name
+        ]
+
+    if not cluster_ids:
         return 0
 
     try:
-        matching_cluster_ids = [
-            cid for cid, cname in names_data.items() if cname.strip().lower() == guest_name
-        ]
-        if not matching_cluster_ids:
-            return 0
-
-        from app.routes.faces import get_face_clusters
         clusters = get_face_clusters()
 
         member_paths = []
-        for cid in matching_cluster_ids:
+        for cid in cluster_ids:
             if cid in clusters:
                 member_paths.extend(clusters[cid]["photos"])
 

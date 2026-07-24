@@ -980,33 +980,46 @@ async def get_guest_photos(
         )
         result = _apply_media(data_q, "filename", media).execute()
 
-    # 3. Fetch family members registered under this guest/household
+    # 3. Household members = the face clusters linked to this guest. The old code
+    #    read a `family_members` table that does not exist in this database, so it
+    #    threw on EVERY request (swallowed by the except) and the member filter
+    #    never had data to show. guest_clusters is the household mechanism: one
+    #    guest link can carry several people.
+    family_members = []
     try:
-        members_res = supabase.table("family_members").select("id, name").eq("guest_id", guest_id).order("name").execute()
-        family_members = members_res.data or []
+        rows = (
+            supabase.table("guest_clusters")
+            .select("cluster_id, label")
+            .eq("guest_id", guest_id)
+            .order("label")
+            .execute()
+        ).data or []
+        family_members = [
+            {"id": str(r["cluster_id"]), "name": r.get("label") or "Someone"} for r in rows
+        ]
     except Exception as e:
-        log.error(f"Error fetching family members in get_guest_photos: {e}")
-        family_members = []
+        log.debug("No guest_clusters for %s: %s", guest_id, e)
 
-    # 4. Map which photo belongs to which family member(s)
+    # 4. Which photos each member appears in — only worth computing for an actual
+    #    household (more than one person on the link); for a single guest every
+    #    photo is theirs and the filter has nothing to offer.
     photo_to_members = {}
-    if family_members:
-        member_ids = [m["id"] for m in family_members]
+    if len(family_members) > 1:
         try:
-            m_photos = supabase.table("member_photos").select("member_id, photo_id, photos(drive_path)").in_("member_id", member_ids).execute()
-            if m_photos.data:
-                for row in m_photos.data:
-                    m_id = row["member_id"]
-                    photo_data = row.get("photos", {})
-                    if photo_data:
-                        drive_path = photo_data.get("drive_path")
-                        if drive_path:
-                            if drive_path not in photo_to_members:
-                                photo_to_members[drive_path] = []
-                            if m_id not in photo_to_members[drive_path]:
-                                photo_to_members[drive_path].append(m_id)
+            from app.routes.faces import get_face_clusters
+            from app.services.drive_paths import drive_id_from_path
+
+            clusters = get_face_clusters()
+            for m in family_members:
+                for path in (clusters.get(m["id"], {}).get("photos") or ()):
+                    d = drive_id_from_path(path)
+                    if not d:
+                        continue
+                    photo_to_members.setdefault(d, [])
+                    if m["id"] not in photo_to_members[d]:
+                        photo_to_members[d].append(m["id"])
         except Exception as e:
-            log.error(f"Error mapping member photos in get_guest_photos: {e}")
+            log.debug("Could not map household member photos: %s", e)
 
     mime_map = get_drive_id_to_mime_map()
     photos = []

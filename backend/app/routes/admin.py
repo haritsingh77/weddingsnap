@@ -1,9 +1,10 @@
 import logging
 from typing import Optional
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Header, Response
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Header, Response, Depends
 from pydantic import BaseModel
 
+from app.auth_deps import require_admin
 from app.database import supabase
 from app.services.face_service import match_guest_selfie, resolve_drive_ids, load_encodings
 from app.config import settings
@@ -14,6 +15,74 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 class LoginRequest(BaseModel):
     password: str
+
+
+class HouseholdMemberBody(BaseModel):
+    cluster_id: int
+    label: Optional[str] = None
+
+
+@router.get("/households/{guest_id}/members", dependencies=[Depends(require_admin)])
+def list_household_members(guest_id: str):
+    """The people currently on this guest's link."""
+    rows = (
+        supabase.table("guest_clusters")
+        .select("cluster_id, label")
+        .eq("guest_id", guest_id)
+        .order("label")
+        .execute()
+    ).data or []
+    g = supabase.table("guests").select("name, is_household").eq("id", guest_id).limit(1).execute().data
+    return {
+        "guest_id": guest_id,
+        "name": (g[0]["name"] if g else None),
+        "is_household": bool(g[0].get("is_household")) if g else False,
+        "members": [{"cluster_id": r["cluster_id"], "label": r.get("label") or "Someone"} for r in rows],
+    }
+
+
+@router.post("/households/{guest_id}/members", dependencies=[Depends(require_admin)])
+def add_household_member(guest_id: str, body: HouseholdMemberBody):
+    """Put another person on this guest's link, turning it into a household.
+
+    A household is just a guest with more than one linked face cluster: the album
+    becomes the union of everyone on the link (wife + husband + kids), and each
+    of them can still be filtered out individually. There is no separate table —
+    guest_clusters already models it, and association reads from there.
+    """
+    guest = supabase.table("guests").select("id").eq("id", guest_id).limit(1).execute().data
+    if not guest:
+        raise HTTPException(status_code=404, detail="Guest not found")
+
+    label = (body.label or "").strip()
+    if not label:
+        c = supabase.table("clusters").select("name").eq("id", body.cluster_id).limit(1).execute().data
+        label = (c[0].get("name") if c else None) or f"Person #{body.cluster_id}"
+
+    supabase.table("guest_clusters").upsert(
+        {"guest_id": guest_id, "cluster_id": body.cluster_id, "label": label},
+        on_conflict="guest_id,cluster_id",
+    ).execute()
+
+    members = (
+        supabase.table("guest_clusters").select("cluster_id").eq("guest_id", guest_id).execute()
+    ).data or []
+    # More than one person on the link => it is a household.
+    supabase.table("guests").update({"is_household": len(members) > 1}).eq("id", guest_id).execute()
+
+    log.info("Household: guest %s now has %d member(s)", guest_id, len(members))
+    return {"success": True, "guest_id": guest_id, "member_count": len(members), "added": label}
+
+
+@router.delete("/households/{guest_id}/members/{cluster_id}", dependencies=[Depends(require_admin)])
+def remove_household_member(guest_id: str, cluster_id: int):
+    """Take a person off this guest's link."""
+    supabase.table("guest_clusters").delete().eq("guest_id", guest_id).eq("cluster_id", cluster_id).execute()
+    members = (
+        supabase.table("guest_clusters").select("cluster_id").eq("guest_id", guest_id).execute()
+    ).data or []
+    supabase.table("guests").update({"is_household": len(members) > 1}).eq("id", guest_id).execute()
+    return {"success": True, "guest_id": guest_id, "member_count": len(members)}
 
 
 @router.post("/login")
