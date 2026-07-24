@@ -1745,12 +1745,14 @@ export default function Gallery() {
                         className="relative max-w-full max-h-[80vh] md:max-h-[85vh] flex flex-col items-center min-w-[280px] sm:min-w-[400px] min-h-[300px] justify-center"
                         onClick={(e) => e.stopPropagation()}
                     >
-                        {/* Subtle "loading full quality" pill — the soft thumbnail is
-                            already visible underneath, so no full-screen spinner. */}
+                        {/* Centered loading indicator — the preview and its controls
+                            only appear once fully loaded, so nothing else is on screen. */}
                         {mediaLoading && (
-                            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-taupe-900/55 text-white/90 text-[11px] font-medium px-3.5 py-1.5 rounded-full backdrop-blur-sm">
-                                <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                                {activePhoto.is_video ? 'Loading video…' : 'Loading full quality…'}
+                            <div className="absolute inset-0 z-20 flex items-center justify-center">
+                                <div className="flex items-center gap-2 bg-taupe-900/55 text-white/90 text-[11px] font-medium px-3.5 py-1.5 rounded-full backdrop-blur-sm">
+                                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                                    {activePhoto.is_video ? 'Loading video…' : 'Loading full quality…'}
+                                </div>
                             </div>
                         )}
 
@@ -1764,36 +1766,29 @@ export default function Gallery() {
                                 className="object-contain max-w-full max-h-[75vh] md:max-h-[80vh] rounded-lg shadow-2xl"
                             />
                         ) : (
-                            // Full-resolution original at full lightbox size. Its own
-                            // dimensions drive the layout (max 85vh tall / full width), so
-                            // the preview is large — not capped to a thumbnail. A soft
-                            // blurred thumbnail sits behind it as an instant placeholder
-                            // while the original streams in; if a file can't be streamed the
-                            // <img> falls back to that thumbnail.
-                            <div
+                            // Screen-sized preview at full lightbox size. It stays invisible
+                            // (opacity 0) and hidden behind the loader until it has fully
+                            // loaded, then fades in — so there's no blurred placeholder or
+                            // halo, just a clean load. Falls back to the thumbnail if the
+                            // preview can't be produced.
+                            <img
                                 key={activePhoto.drive_id}
-                                className="relative flex items-center justify-center max-w-full max-h-[82vh]"
-                            >
-                                <img
-                                    src={withToken(`${API_BASE}${activePhoto.thumb_url}`)}
-                                    alt=""
-                                    aria-hidden="true"
-                                    className="absolute inset-0 w-full h-full object-contain rounded-lg blur-[2px] scale-[1.02]"
-                                />
-                                <img
-                                    src={withToken(`${API_BASE}/photos/preview/${activePhoto.drive_id}`)}
-                                    alt=""
-                                    onLoad={(e) => { e.currentTarget.style.opacity = 1; setMediaLoading(false) }}
-                                    onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = withToken(`${API_BASE}${activePhoto.thumb_url}`); e.currentTarget.style.opacity = 1; setMediaLoading(false) }}
-                                    style={{ opacity: 0, transition: 'opacity 0.4s ease' }}
-                                    className="relative object-contain max-w-full max-h-[82vh] rounded-lg shadow-2xl"
-                                />
-                            </div>
+                                src={withToken(`${API_BASE}/photos/preview/${activePhoto.drive_id}`)}
+                                alt=""
+                                onLoad={(e) => { e.currentTarget.style.opacity = 1; setMediaLoading(false) }}
+                                onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = withToken(`${API_BASE}${activePhoto.thumb_url}`); e.currentTarget.style.opacity = 1; setMediaLoading(false) }}
+                                style={{ opacity: 0, transition: 'opacity 0.35s ease' }}
+                                className="object-contain max-w-full max-h-[82vh] rounded-lg shadow-2xl"
+                            />
                         )}
                         
-                        {/* Caption & Download bar */}
-                        <div className="w-full flex flex-col sm:flex-row sm:items-center justify-between mt-4 text-white px-2 gap-3 sm:gap-4">
-                            <div className="text-xs min-w-0">
+                        {/* Caption & controls — pinned to the bottom-right of the screen,
+                            shown only once the full-quality preview has finished loading. */}
+                        {!mediaLoading && (
+                        <div
+                            onClick={(e) => e.stopPropagation()}
+                            className="fixed bottom-5 right-5 z-50 flex flex-wrap items-center justify-end text-white gap-3 bg-taupe-900/70 backdrop-blur-md rounded-2xl px-4 py-3 shadow-2xl border border-white/10 max-w-[calc(100vw-2.5rem)]">
+                            <div className="text-xs min-w-0 mr-1">
                                 <span className="font-semibold uppercase tracking-wider text-gold-400 block truncate">
                                     {activePhoto.is_video ? '🎥 Video' : activePhoto.is_common ? '👥 Group Moment' : '👤 Personal Moment'}
                                 </span>
@@ -1847,6 +1842,7 @@ export default function Gallery() {
                                 </button>
                             </div>
                         </div>
+                        )}
                         {/* People in this photo */}
                         {(loadingPeople || photoPeople.length > 0) && (
                             <div className="w-full mt-3 px-2" onClick={e => e.stopPropagation()}>
