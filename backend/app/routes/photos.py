@@ -852,18 +852,33 @@ async def get_guest_photos(
             self.data = data
 
     if want == "common":
-        # Everyone sees these, so guest_photos need not be involved at all.
-        count_q = supabase.table("photos").select("id", count="exact").eq("is_common", True)
-        total_count = _apply_media(count_q, "filename", media).execute().count or 0
-        data_q = (
-            supabase.table("photos")
-            .select("drive_path, is_common, face_count")
-            .eq("is_common", True)
-            .order("created_at", desc=True)
-            .order("id", desc=True)
+        # "Group Moments" = the group photos THIS guest is actually in, not every
+        # group photo in the wedding. Harit's group moments are his; Mahima's are
+        # hers. Previously this returned the whole common pool, so every guest saw
+        # an identical tab full of strangers' group shots and venue photography.
+        #
+        # Same guest_photos -> photos join as "Just Me", narrowed to is_common, so
+        # it paginates on the server and the ids never reach the URL. The
+        # created_at + photo_id tiebreaker keeps paging stable (thousands of
+        # photos share an imported timestamp).
+        count_q = (
+            supabase.table("guest_photos")
+            .select("photos!inner(id)", count="exact")
+            .eq("guest_id", guest_id)
+            .eq("photos.is_common", True)
+        )
+        total_count = _apply_media(count_q, "photos.filename", media).execute().count or 0
+        rows_q = (
+            supabase.table("guest_photos")
+            .select("photo_id, photos!inner(drive_path, is_common, face_count, created_at)")
+            .eq("guest_id", guest_id)
+            .eq("photos.is_common", True)
+            .order("created_at", desc=True, foreign_table="photos")
+            .order("photo_id", desc=True)
             .range(offset, offset + limit - 1)
         )
-        result = _apply_media(data_q, "filename", media).execute()
+        rows = _apply_media(rows_q, "photos.filename", media).execute()
+        result = _Rows([r["photos"] for r in rows.data if r.get("photos")])
 
     elif want == "mine" and personal_count:
         # "Just Me" = every photo this guest is IN — solo shots AND group shots
