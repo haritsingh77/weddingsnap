@@ -692,6 +692,13 @@ def associate_guest_by_name(guest_id: str, name: str) -> int:
         # corpus shares a basename with a different photo, so a name lookup
         # would associate the guest with photos they aren't in.
         drive_ids = resolve_drive_ids(member_paths)
+        # Dedupe: a household links several clusters and one group photo can hold
+        # more than one of them (wife AND husband), so the same drive id arrives
+        # once per member. Left in, the upsert below carries duplicate keys and
+        # Postgres rejects the whole batch with "ON CONFLICT DO UPDATE command
+        # cannot affect row a second time" — which silently left every household
+        # album unchanged.
+        drive_ids = list(dict.fromkeys(drive_ids))
         if not drive_ids:
             return 0
 
@@ -726,9 +733,13 @@ def associate_guest_by_name(guest_id: str, name: str) -> int:
             from app.services.face_state import get_disassociated_photo_ids
             disassociated_set = get_disassociated_photo_ids(guest_id)
             photo_rows = []
+            seen_pids = set()
             for drive_id in drive_ids:
                 pid = drive_to_id.get(drive_id)
-                if pid and pid not in disassociated_set:
+                # Two drive ids can resolve to the same photos row, so guard the
+                # photo_id as well — the upsert must not see a key twice.
+                if pid and pid not in disassociated_set and pid not in seen_pids:
+                    seen_pids.add(pid)
                     photo_rows.append({"guest_id": guest_id, "photo_id": pid})
             if photo_rows:
                 supabase.table("guest_photos").upsert(

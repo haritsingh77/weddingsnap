@@ -81,8 +81,14 @@ def save_cached_file(filename: str, data: bytes, mime_type: str = "image/jpeg"):
         log.warning(f"Failed to write L1 cache for '{filename}': {e}")
 
     is_thumbnail = filename.startswith("thumb_") or filename.startswith("face_cluster_")
+    # Config JSON (categories.json, household_names.json, cluster_names.json…)
+    # must persist too. Only thumbnails used to be uploaded, so everything else
+    # lived in LOCAL_CACHE_DIR — which is /tmp on Cloud Run, wiped on every cold
+    # start. Creating an album or naming a family looked like it worked and then
+    # quietly vanished.
+    is_config = filename.endswith(".json")
 
-    if is_thumbnail:
+    if is_thumbnail or is_config:
         import threading
         def _upload():
             try:

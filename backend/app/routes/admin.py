@@ -22,6 +22,63 @@ class HouseholdMemberBody(BaseModel):
     label: Optional[str] = None
 
 
+class HouseholdNameBody(BaseModel):
+    name: str
+
+
+# Family names live in a cached JSON rather than a guests column, because there
+# is no household_name column and adding one needs DDL the app has no
+# credentials for. Keyed by the guest_id that owns the link.
+_HOUSEHOLD_NAMES = "household_names.json"
+
+
+def _household_names() -> dict:
+    from app.services.drive_cache import get_cached_json
+    return get_cached_json(_HOUSEHOLD_NAMES) or {}
+
+
+@router.get("/households", dependencies=[Depends(require_admin)])
+def list_households():
+    """Every family, with who is on the link and the name the admin gave it."""
+    names = _household_names()
+    guests = (supabase.table("guests").select("id,name,is_household").eq("is_household", True).execute()).data or []
+    links = (supabase.table("guest_clusters").select("guest_id,cluster_id,label").execute()).data or []
+    by_guest: dict = {}
+    for r in links:
+        by_guest.setdefault(r["guest_id"], []).append(
+            {"cluster_id": r["cluster_id"], "label": r.get("label") or "Someone"}
+        )
+    out = []
+    for g in guests:
+        members = sorted(by_guest.get(g["id"], []), key=lambda m: m["label"])
+        out.append({
+            "guest_id": g["id"],
+            "owner": g["name"],
+            "family_name": names.get(g["id"]) or "",   # blank => fall back to owner
+            "members": members,
+            "member_count": len(members),
+        })
+    out.sort(key=lambda h: -h["member_count"])
+    return {"households": out}
+
+
+@router.post("/households/{guest_id}/name", dependencies=[Depends(require_admin)])
+def set_household_name(guest_id: str, body: HouseholdNameBody):
+    """Name a family, e.g. "The Ashrafs". Empty clears it (falls back to the owner)."""
+    from app.services.drive_cache import save_cached_json
+    guest = supabase.table("guests").select("id").eq("id", guest_id).limit(1).execute().data
+    if not guest:
+        raise HTTPException(status_code=404, detail="Guest not found")
+    names = _household_names()
+    label = (body.name or "").strip()
+    if label:
+        names[guest_id] = label
+    else:
+        names.pop(guest_id, None)
+    save_cached_json(_HOUSEHOLD_NAMES, names)
+    return {"success": True, "guest_id": guest_id, "family_name": label}
+
+
 @router.get("/households/{guest_id}/members", dependencies=[Depends(require_admin)])
 def list_household_members(guest_id: str):
     """The people currently on this guest's link."""

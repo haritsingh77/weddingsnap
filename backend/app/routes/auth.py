@@ -193,6 +193,7 @@ class LinkResponse(BaseModel):
     name: str
     is_household: bool
     is_admin: bool = False
+    household_name: str = ""   # admin-given family name, blank => use `name`
     event_name: str
     members: list = []
 
@@ -249,12 +250,22 @@ async def open_link(token: str):
 
     log.info("Link opened: %s (%s), %d member(s)", guest["name"], guest["id"], len(members))
     from app.auth_deps import ADMIN_GUEST_IDS
+
+    household_name = ""
+    if guest.get("is_household"):
+        try:
+            from app.services.drive_cache import get_cached_json
+            household_name = (get_cached_json("household_names.json") or {}).get(guest["id"], "") or ""
+        except Exception as e:
+            log.debug("No household name for %s: %s", guest["id"], e)
+
     return LinkResponse(
         valid=True,
         guest_id=guest["id"],
         name=guest["name"],
         is_household=bool(guest.get("is_household")),
         is_admin=guest["id"] in ADMIN_GUEST_IDS,
+        household_name=household_name,
         event_name=event_name,
         members=members,
     )
