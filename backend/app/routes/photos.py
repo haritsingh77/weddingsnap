@@ -1080,6 +1080,49 @@ async def guest_not_me(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class RemoveFromAlbumBody(BaseModel):
+    album: str
+
+
+@router.post("/{drive_id}/remove-from-group", dependencies=[Depends(require_admin)])
+def remove_from_group(drive_id: str):
+    """Take one photo out of Group Moments, without deleting it (admin).
+
+    Group Moments membership is the photos.is_common flag, decided at
+    preprocessing by "4+ detected faces OR a venue/decor folder name". That
+    heuristic knows nothing about who the subject is, so a portrait of one person
+    with a crowd behind them lands in everyone's Group Moments. This is the
+    manual correction for that: the photo stays in the gallery and in the
+    personal albums of whoever is in it — it just stops being a group moment.
+    """
+    res = supabase.table("photos").select("id").eq("drive_path", drive_id).limit(1).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Photo not found.")
+    supabase.table("photos").update({"is_common": False}).eq("drive_path", drive_id).execute()
+    log.info("Admin removed %s from Group Moments", drive_id)
+    return {"success": True, "drive_id": drive_id, "is_common": False}
+
+
+@router.post("/{drive_id}/remove-from-album", dependencies=[Depends(require_admin)])
+def remove_from_album(drive_id: str, body: RemoveFromAlbumBody):
+    """Remove one photo from one album/category (admin). The photo itself stays."""
+    from app.services.drive_cache import get_cached_json, save_cached_json
+
+    album = (body.album or "").strip()
+    categories = get_cached_json("categories.json") or {}
+    if album not in categories:
+        raise HTTPException(status_code=404, detail="Album not found.")
+
+    before = len(categories[album])
+    categories[album] = [d for d in categories[album] if d != drive_id]
+    if len(categories[album]) == before:
+        return {"success": True, "removed": False, "album": album}
+
+    save_cached_json("categories.json", categories)
+    log.info("Admin removed %s from album %r", drive_id, album)
+    return {"success": True, "removed": True, "album": album, "remaining": len(categories[album])}
+
+
 @router.delete("/{drive_id}", dependencies=[Depends(require_admin)])
 async def delete_photo(drive_id: str):
     """
