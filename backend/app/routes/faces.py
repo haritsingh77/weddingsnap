@@ -161,7 +161,7 @@ def _clusters_from_db() -> dict | None:
     if _db_clusters_cache is not None:
         return _db_clusters_cache
 
-    from scripts.face_engine.matching import drive_record_path
+    from app.services.drive_paths import drive_record_path
 
     rows, offset = [], 0
     while True:

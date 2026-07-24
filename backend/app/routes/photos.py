@@ -1347,7 +1347,7 @@ async def delete_photos_batch(body: DeleteBatchRequest):
             # Over half the corpus shares a basename with a different photo, so
             # filtering by name would delete unrelated photos' encodings too.
             if filename:
-                from scripts.face_engine.matching import drive_id_from_path
+                from app.services.drive_paths import drive_id_from_path
 
                 def _record_drive_id(item):
                     return drive_id_from_path(item["path"]) or mapping.get(

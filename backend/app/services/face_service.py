@@ -294,7 +294,7 @@ def _find_matching_photos_db(
 
     from collections import Counter
 
-    from scripts.face_engine.matching import drive_record_path
+    from app.services.drive_paths import drive_record_path
 
     def _key(row: dict) -> str:
         """Identify a hit by Drive id when the RPC provides one.
@@ -523,7 +523,7 @@ def _expand_via_clusters(supabase, best: dict[str, float], tolerance: float,
     """
     import os
 
-    from scripts.face_engine.matching import drive_record_path
+    from app.services.drive_paths import drive_record_path
 
     min_hits = int(os.getenv("CLUSTER_EXPAND_MIN_HITS", "5"))
     if not best or min_hits <= 0 or not cluster_hits:
@@ -575,7 +575,7 @@ def _expand_via_clusters(supabase, best: dict[str, float], tolerance: float,
 def resolve_one_drive_id(path: str, default: str = "") -> str:
     """Single-path variant of resolve_drive_ids. Prefers the id embedded in the
     record path; falls back to the (ambiguous) basename map for legacy records."""
-    from scripts.face_engine.matching import drive_id_from_path
+    from app.services.drive_paths import drive_id_from_path
 
     drive_id = drive_id_from_path(path)
     if drive_id:
@@ -592,7 +592,7 @@ def resolve_drive_ids(local_paths: list[str]) -> list[str]:
     corpus shares one with a different photo — so that path falls back to the
     name map and is logged as ambiguous.
     """
-    from scripts.face_engine.matching import drive_id_from_path
+    from app.services.drive_paths import drive_id_from_path
 
     mapping = get_filename_map()
     drive_ids = []
