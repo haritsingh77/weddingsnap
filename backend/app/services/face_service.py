@@ -677,16 +677,36 @@ def associate_guest_by_name(guest_id: str, name: str) -> int:
         if not drive_ids:
             return 0
 
-        photos_to_upsert = [{"drive_path": d, "is_common": False, "face_count": 1} for d in drive_ids]
-        upserted = supabase.table("photos").upsert(
-            photos_to_upsert, on_conflict="drive_path"
-        ).execute()
+        # Make sure a photos row exists for each drive id WITHOUT overwriting the
+        # one that's already there. This used to upsert
+        # {"is_common": False, "face_count": 1} for every id, so each time a guest
+        # opened their album it flipped that guest's photos OUT of Group Moments
+        # and reset face_count to 1. That is why the common pool kept shrinking,
+        # why the header count changed on every reload, and why a guest's photos
+        # showed no is_common overlap at all. Only insert what's missing.
+        from app.services.db_paging import chunked
 
-        if upserted.data:
+        drive_to_id: dict[str, int] = {}
+        for batch in chunked(drive_ids, 150):
+            for r in (
+                supabase.table("photos")
+                .select("id, drive_path")
+                .in_("drive_path", list(batch))
+                .execute()
+            ).data or []:
+                drive_to_id[r["drive_path"]] = r["id"]
+
+        missing = [d for d in drive_ids if d not in drive_to_id]
+        if missing:
+            inserted = supabase.table("photos").insert(
+                [{"drive_path": d, "is_common": False, "face_count": 1} for d in missing]
+            ).execute()
+            for r in (inserted.data or []):
+                drive_to_id[r["drive_path"]] = r["id"]
+
+        if drive_to_id:
             from app.services.face_state import get_disassociated_photo_ids
             disassociated_set = get_disassociated_photo_ids(guest_id)
-
-            drive_to_id = {p["drive_path"]: p["id"] for p in upserted.data}
             photo_rows = []
             for drive_id in drive_ids:
                 pid = drive_to_id.get(drive_id)
