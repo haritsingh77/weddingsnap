@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { prepareDownload, getDownloadStatus, getStreamUrl } from '../services/api'
+import { getDownloadAllUrl } from '../services/api'
 
 export default function Download() {
     const navigate = useNavigate()
@@ -46,53 +46,18 @@ export default function Download() {
         }
     }, [])
 
+    // The old flow was prepare -> poll -> stream: the server built the entire ZIP
+    // in LOCAL_CACHE_DIR first, which is /tmp (RAM) on Cloud Run, so a large
+    // album OOM-killed the container and the session sat at "processing" for
+    // ever. The archive is now generated on the fly, so the browser just starts
+    // downloading and there is nothing to poll.
     const start = async () => {
-        setStatus('preparing')
-        try {
-            const res = await prepareDownload(guestId)
-            const sid = res.data.session_id
-            setSessionId(sid)
-            poll(sid)
-        } catch (err) {
-            console.error('Failed to prepare download:', err)
-            setStatus('failed')
-        }
-    }
-
-    const poll = (sid) => {
-        if (intervalRef.current) clearInterval(intervalRef.current)
-
-        intervalRef.current = setInterval(async () => {
-            try {
-                const res = await getDownloadStatus(sid)
-                const { status: s, photo_count } = res.data
-                if (s === 'ready') {
-                    setPhotoCount(photo_count)
-                    setStatus('ready')
-                    if (intervalRef.current) {
-                        clearInterval(intervalRef.current)
-                        intervalRef.current = null
-                    }
-                } else if (s === 'failed') {
-                    setStatus('failed')
-                    if (intervalRef.current) {
-                        clearInterval(intervalRef.current)
-                        intervalRef.current = null
-                    }
-                }
-            } catch (err) {
-                console.error('Download status check failed:', err)
-                setStatus('failed')
-                if (intervalRef.current) {
-                    clearInterval(intervalRef.current)
-                    intervalRef.current = null
-                }
-            }
-        }, 4000)
+        setStatus('ready')
+        window.location.href = getDownloadAllUrl(guestId)
     }
 
     const downloadZip = () => {
-        window.location.href = getStreamUrl(guestId, sessionId)
+        window.location.href = getDownloadAllUrl(guestId)
     }
 
     // Navigation Guard
