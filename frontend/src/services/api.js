@@ -136,6 +136,15 @@ export const adminUpdateGuest = (guestId, name, phone, selfieFile = null, tolera
 export const sharePhoto = (driveId, guestId) =>
   api.post('/photos/share', { drive_id: driveId, guest_id: guestId })
 
+// Admin corrections for a single photo. Neither deletes it: the first only
+// clears the is_common flag (drops it out of Group Moments), the second only
+// removes it from one album.
+export const removeFromGroup = (driveId) =>
+  api.post(`/photos/${driveId}/remove-from-group`)
+
+export const removeFromAlbum = (driveId, album) =>
+  api.post(`/photos/${driveId}/remove-from-album`, { album })
+
 export const getGuestsList = () =>
   api.get('/faces/guests-list')
 

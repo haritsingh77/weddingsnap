@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import {
   withToken,
   getDownloadAllUrl,
+  removeFromGroup,
+  removeFromAlbum,
   getPhotos,
   getAllPhotos,
   getPhotoPeople,
@@ -745,6 +747,36 @@ export default function Gallery() {
     }
 
     // Handle guest-level "Not Me" disassociation action
+    // Admin: drop a photo out of Group Moments (clears is_common). The photo is
+    // NOT deleted — it stays in the gallery and in the album of whoever is in it.
+    const handleRemoveFromGroup = async (driveId) => {
+        if (!window.confirm("Remove this from Group Moments? It stays in the gallery and in the personal albums of whoever is in it.")) return
+        try {
+            await removeFromGroup(driveId)
+            setPhotos(prev => prev.filter(p => p.drive_id !== driveId))
+            setClusterPhotos(prev => prev.filter(p => p.drive_id !== driveId))
+            setLightboxIndex(null)
+        } catch (err) {
+            console.error('Remove from group failed:', err)
+            alert('Could not remove this from Group Moments.')
+        }
+    }
+
+    // Admin: remove a photo from the album currently being viewed.
+    const handleRemoveFromAlbum = async (driveId, album) => {
+        if (!album) return
+        if (!window.confirm(`Remove this photo from the "${album}" album? The photo itself is kept.`)) return
+        try {
+            await removeFromAlbum(driveId, album)
+            setCategoryPhotos(prev => prev.filter(p => p.drive_id !== driveId))
+            setPhotos(prev => prev.filter(p => p.drive_id !== driveId))
+            setLightboxIndex(null)
+        } catch (err) {
+            console.error('Remove from album failed:', err)
+            alert('Could not remove this photo from the album.')
+        }
+    }
+
     const handleNotMePhoto = async (driveId) => {
         if (!guestId) return;
         if (!window.confirm("Is this not you? We will remove this photo from your personal folder and make sure it doesn't get matched to you again.")) {
@@ -1801,13 +1833,31 @@ export default function Gallery() {
                             <div className="flex items-center gap-2 flex-shrink-0">
                                 {isAdmin && (
                                     <>
-                                        <button 
+                                        <button
                                             onClick={() => setShowShareDropdown(true)}
                                             className="bg-taupe-800 hover:bg-stone-750 text-white px-4 py-2.5 rounded-xl text-xs font-semibold transition-all duration-300 flex items-center gap-1.5 cursor-pointer shadow-lg border border-white/10"
                                         >
-                                            👤 Share
+                                            👤 Assign
                                         </button>
-                                        <button 
+                                        {activePhoto.is_common && (
+                                            <button
+                                                onClick={() => handleRemoveFromGroup(activePhoto.drive_id)}
+                                                title="Takes it out of Group Moments — the photo is kept"
+                                                className="bg-taupe-800/90 hover:bg-stone-750 text-white px-4 py-2.5 rounded-xl text-xs font-semibold transition-all duration-300 flex items-center gap-1.5 cursor-pointer shadow-lg border border-white/10"
+                                            >
+                                                👥 Not a group photo
+                                            </button>
+                                        )}
+                                        {selectedCategory && (
+                                            <button
+                                                onClick={() => handleRemoveFromAlbum(activePhoto.drive_id, selectedCategory)}
+                                                title={`Remove from the "${selectedCategory}" album — the photo is kept`}
+                                                className="bg-taupe-800/90 hover:bg-stone-750 text-white px-4 py-2.5 rounded-xl text-xs font-semibold transition-all duration-300 flex items-center gap-1.5 cursor-pointer shadow-lg border border-white/10"
+                                            >
+                                                🗂️ Remove from album
+                                            </button>
+                                        )}
+                                        <button
                                             onClick={() => handleDeletePhoto(activePhoto.drive_id)}
                                             className="bg-red-650 hover:bg-red-750 text-white px-4 py-2.5 rounded-xl text-xs font-semibold transition-all duration-300 flex items-center gap-1.5 cursor-pointer shadow-lg"
                                         >
