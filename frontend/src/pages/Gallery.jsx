@@ -5,6 +5,8 @@ import {
   getDownloadAllUrl,
   removeFromGroup,
   removeFromAlbum,
+  getHouseholds,
+  setHouseholdName,
   getPhotos,
   getAllPhotos,
   getPhotoPeople,
@@ -262,6 +264,10 @@ export default function Gallery() {
     // Photos vs Videos within a tab. Default to photos so the newest clips never
     // lead the gallery; the switch appears on the Just Me / Group Moments tabs.
     const [mediaFilter, setMediaFilter] = useState('photos')  // photos | videos
+    // Families tab (admin): every household, and the name the admin gave it.
+    const [households, setHouseholds] = useState([])
+    const [loadingHouseholds, setLoadingHouseholds] = useState(false)
+    const [savingFamily, setSavingFamily] = useState(null)
     // The guest's OWN matched count, independent of the active tab. The header
     // must never show the "All Moments" total (that's every file in the Drive,
     // not photos matched to this guest).
@@ -403,8 +409,40 @@ export default function Gallery() {
         fetchingPageRef.current = 0
         setPhotos([])
         setPage(1)
+        // Families is a management view, not a photo feed — fetching a page here
+        // would be wasted work and would overwrite the header's moment count.
+        if (tab === 'families') return
         fetchPhotos(1)
     }, [guestId, tab, mediaFilter, navigate]) // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Families tab: load the households on demand (admin only).
+    useEffect(() => {
+        if (tab !== 'families' || !isAdmin) return
+        let cancelled = false
+        setLoadingHouseholds(true)
+        getHouseholds()
+            .then(res => { if (!cancelled) setHouseholds(res.data?.households || []) })
+            .catch(err => { if (!cancelled) { console.error('Failed to load households:', err); setHouseholds([]) } })
+            .finally(() => { if (!cancelled) setLoadingHouseholds(false) })
+        return () => { cancelled = true }
+    }, [tab, isAdmin])
+
+    // Rename a family. Blank falls back to the link owner's name.
+    const handleRenameFamily = async (guestId_, currentName, owner) => {
+        const next = window.prompt(`Family name for ${owner}'s household:`, currentName || '')
+        if (next === null) return
+        setSavingFamily(guestId_)
+        try {
+            await setHouseholdName(guestId_, next.trim())
+            setHouseholds(prev => prev.map(h =>
+                h.guest_id === guestId_ ? { ...h, family_name: next.trim() } : h))
+        } catch (err) {
+            console.error('Rename family failed:', err)
+            alert('Could not save that family name.')
+        } finally {
+            setSavingFamily(null)
+        }
+    }
 
     // Infinite Scroll helper
     useEffect(() => {
@@ -972,7 +1010,7 @@ export default function Gallery() {
 
                 {/* Aesthetic Navigation Tabs */}
                 <div className="max-w-4xl mx-auto flex gap-5 sm:gap-6 mt-4 sm:mt-6 border-t border-gold-100 pt-4 overflow-x-auto whitespace-nowrap scrollbar-none -mx-4 px-4 sm:mx-0 sm:px-0">
-                    {['all', 'mine', 'common', 'people', 'categories'].filter(t => (t !== 'people' && t !== 'all') || isAdmin).map(t => (
+                    {['all', 'mine', 'common', 'people', 'families', 'categories'].filter(t => (t !== 'people' && t !== 'all' && t !== 'families') || isAdmin).map(t => (
                         <button
                             key={t}
                             onClick={() => {
@@ -988,7 +1026,7 @@ export default function Gallery() {
                                     : 'border-transparent text-taupe-300 hover:text-taupe-500'
                                 }`}
                         >
-                            {t === 'all' ? 'All Moments' : t === 'mine' ? 'Just Me' : t === 'common' ? 'Group Moments' : t === 'people' ? 'People' : 'Albums'}
+                            {t === 'all' ? 'All Moments' : t === 'mine' ? 'Just Me' : t === 'common' ? 'Group Moments' : t === 'people' ? 'People' : t === 'families' ? 'Families' : 'Albums'}
                         </button>
                     ))}
                 </div>
@@ -1283,8 +1321,57 @@ export default function Gallery() {
                     </div>
                 )}
 
+                {/* FAMILIES (admin): every household that shares a link */}
+                {tab === 'families' && isAdmin && (
+                    <div className="mb-8">
+                        <div className="mb-6">
+                            <h2 className="font-serif text-taupe-900 text-xl sm:text-2xl tracking-tight leading-none">Families</h2>
+                            <p className="text-taupe-400 text-xs font-medium mt-1.5">
+                                {loadingHouseholds
+                                    ? 'Loading…'
+                                    : `${households.length} ${households.length === 1 ? 'family shares' : 'families share'} a link — everyone on a link sees the whole family's photos`}
+                            </p>
+                        </div>
+
+                        {!loadingHouseholds && households.length === 0 && (
+                            <p className="text-taupe-400 text-sm">No families yet.</p>
+                        )}
+
+                        <div className="grid gap-3 sm:grid-cols-2">
+                            {households.map(h => (
+                                <div key={h.guest_id} className="bg-white border border-gold-200/60 rounded-2xl p-4 shadow-xs">
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0">
+                                            <p className="font-serif text-taupe-900 text-base truncate">
+                                                {h.family_name || `${h.owner}'s family`}
+                                            </p>
+                                            <p className="text-[11px] text-taupe-400 mt-0.5">
+                                                link owner: {h.owner} · {h.member_count} {h.member_count === 1 ? 'person' : 'people'}
+                                            </p>
+                                        </div>
+                                        <button
+                                            onClick={() => handleRenameFamily(h.guest_id, h.family_name, h.owner)}
+                                            disabled={savingFamily === h.guest_id}
+                                            className="shrink-0 bg-white border border-gold-200/60 text-taupe-700 text-[11px] font-semibold px-3 py-1.5 rounded-lg hover:bg-ivory-100 cursor-pointer transition-all"
+                                        >
+                                            {savingFamily === h.guest_id ? 'Saving…' : (h.family_name ? 'Rename' : 'Name it')}
+                                        </button>
+                                    </div>
+                                    <div className="flex flex-wrap gap-1.5 mt-3">
+                                        {h.members.map(m => (
+                                            <span key={m.cluster_id} className="text-[11px] bg-ivory-100 border border-gold-200/50 text-taupe-600 rounded-full px-2.5 py-1">
+                                                {m.label}
+                                            </span>
+                                        ))}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
                 {/* 3. STANDARD FEED OR SELECTED COLLECTION DETAIL FEED */}
-                {((tab !== 'people' && tab !== 'categories') || selectedCluster || selectedCategory) && (
+                {((tab !== 'people' && tab !== 'categories' && tab !== 'families') || selectedCluster || selectedCategory) && (
                     <>
                         {/* Standard Tabs Header / Action Bar */}
                         {!selectedCluster && !selectedCategory && (tab === 'all' || tab === 'mine' || tab === 'common') && (

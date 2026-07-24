@@ -136,6 +136,13 @@ export const adminUpdateGuest = (guestId, name, phone, selfieFile = null, tolera
 export const sharePhoto = (driveId, guestId) =>
   api.post('/photos/share', { drive_id: driveId, guest_id: guestId })
 
+// Households: every family that shares a link, and the name the admin gave it.
+export const getHouseholds = () =>
+  api.get('/admin/households')
+
+export const setHouseholdName = (guestId, name) =>
+  api.post(`/admin/households/${guestId}/name`, { name })
+
 // Admin corrections for a single photo. Neither deletes it: the first only
 // clears the is_common flag (drops it out of Group Moments), the second only
 // removes it from one album.
