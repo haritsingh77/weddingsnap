@@ -436,6 +436,11 @@ def preview_photo(file_id: str):
         buf.seek(0)
 
         img = Image.open(buf)
+        # draft() lets the JPEG decoder emit at 1/2, 1/4 or 1/8 scale, so a
+        # 6048x4032 original is decoded at ~1512px instead of being expanded to
+        # ~73 MB of raw RGB first. With concurrency packing several guests onto
+        # one 1 GiB container, that full decode was the memory cliff.
+        img.draft("RGB", (1600, 1600))
         img = ImageOps.exif_transpose(img)
         img.thumbnail((1600, 1600))
         if img.mode in ("RGBA", "P"):
@@ -1005,19 +1010,34 @@ async def get_guest_photos(
     #    photo is theirs and the filter has nothing to offer.
     photo_to_members = {}
     if len(family_members) > 1:
+        # Only resolve members for the ~50 photos ON THIS PAGE, with one small
+        # faces lookup. The first version called get_face_clusters() (all 27k
+        # faces) and walked every member's entire photo list on every request —
+        # ~8,000 paths per page for a big household — which made a single request
+        # take minutes and was the main reason 10 concurrent guests collapsed.
         try:
-            from app.routes.faces import get_face_clusters
-            from app.services.drive_paths import drive_id_from_path
+            from app.services.db_paging import chunked
 
-            clusters = get_face_clusters()
-            for m in family_members:
-                for path in (clusters.get(m["id"], {}).get("photos") or ()):
-                    d = drive_id_from_path(path)
-                    if not d:
-                        continue
-                    photo_to_members.setdefault(d, [])
-                    if m["id"] not in photo_to_members[d]:
-                        photo_to_members[d].append(m["id"])
+            page_drives = [
+                p.get("drive_path") for p in (result.data or []) if p.get("drive_path")
+            ]
+            member_cids = {m["id"] for m in family_members}
+            if page_drives:
+                for batch in chunked(page_drives, 150):
+                    rows_f = (
+                        supabase.table("faces")
+                        .select("drive_id, cluster_id")
+                        .in_("drive_id", list(batch))
+                        .execute()
+                    ).data or []
+                    for f in rows_f:
+                        cid = str(f.get("cluster_id"))
+                        d = f.get("drive_id")
+                        if not d or cid not in member_cids:
+                            continue
+                        photo_to_members.setdefault(d, [])
+                        if cid not in photo_to_members[d]:
+                            photo_to_members[d].append(cid)
         except Exception as e:
             log.debug("Could not map household member photos: %s", e)
 
