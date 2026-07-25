@@ -409,9 +409,14 @@ export default function Gallery() {
         fetchingPageRef.current = 0
         setPhotos([])
         setPage(1)
-        // Families is a management view, not a photo feed — fetching a page here
-        // would be wasted work and would overwrite the header's moment count.
-        if (tab === 'families') return
+        setError('')
+        // Only All Moments / Just Me / Group Moments are photo feeds. People,
+        // Families and Albums are landing views (their own detail fetch runs when
+        // you open a cluster/album). Firing the main photo fetch here was wasted
+        // work — and on People it fired the heavy filter=all merge (~25s for a
+        // big album) which competed with the clusters call, showing "Could not
+        // load gallery photos" and starving the People list.
+        if (tab !== 'all' && tab !== 'mine' && tab !== 'common') return
         fetchPhotos(1)
     }, [guestId, tab, mediaFilter, navigate]) // eslint-disable-line react-hooks/exhaustive-deps
 
