@@ -356,12 +356,42 @@ class SetProfilePicRequest(BaseModel):
     drive_id: str
 
 
+_PEOPLE_TAB_CACHE = "people_tab.json"
+_PEOPLE_TAB_TTL = 600  # seconds
+
+
+def _bust_people_tab_cache():
+    """Drop both cluster caches so a rename/merge shows on the People tab now,
+    not only after the TTL. The in-memory face map is per-instance; the JSON is
+    shared, so mark it stale (built_at=0) rather than delete it."""
+    global _db_clusters_cache
+    _db_clusters_cache = None
+    try:
+        from app.services.drive_cache import save_cached_json
+        save_cached_json(_PEOPLE_TAB_CACHE, {"built_at": 0, "clusters": []})
+    except Exception:
+        pass
+
+
 @router.get("/clusters", dependencies=[Depends(require_admin)])
 def get_clusters():
     """Get list of recognized face clusters with counts, names, and thumbnail links."""
-    from app.services.drive_cache import get_cached_json
+    import time
+    from app.services.drive_cache import get_cached_json, save_cached_json
     from app.database import supabase
     from app.config import settings
+
+    # Building this scans the whole faces table (~27k rows) AND every guest_photos
+    # row (~24k), which is ~9s on a cold instance and was the People tab's only
+    # remaining slowness. The result changes rarely (renames, merges, new photos),
+    # so cache it for a few minutes: a cold instance then reads one small JSON
+    # instead of re-scanning both tables. Renames/merges below clear it explicitly.
+    try:
+        cached = get_cached_json(_PEOPLE_TAB_CACHE)
+        if isinstance(cached, dict) and (time.time() - cached.get("built_at", 0)) < _PEOPLE_TAB_TTL:
+            return cached.get("clusters", [])
+    except Exception as e:
+        log.debug("people-tab cache read failed: %s", e)
 
     # 1. Fetch registered guests with photo counts
     guests_list = []
@@ -464,7 +494,13 @@ def get_clusters():
     # Sort raw clusters by count descending, slice to top 100 to reduce UI noise, and append after guests
     ui_clusters = sorted(ui_clusters, key=lambda x: x["count"], reverse=True)
     ui_clusters = ui_clusters[:100]
-    return guests_list + ui_clusters
+    result = guests_list + ui_clusters
+
+    try:
+        save_cached_json(_PEOPLE_TAB_CACHE, {"built_at": time.time(), "clusters": result})
+    except Exception as e:
+        log.debug("people-tab cache write failed: %s", e)
+    return result
 
 
 @router.post("/clusters/{cluster_id}/rename", dependencies=[Depends(require_admin)])
@@ -501,6 +537,7 @@ def rename_cluster(cluster_id: str, body: RenameClusterRequest):
             except Exception as sync_err:
                 log.error(f"Failed to sync guest rename in cluster_names.json: {sync_err}")
                 
+        _bust_people_tab_cache()
         return {"success": True, "cluster_id": cluster_id, "name": new_name}
 
     from app.services.drive_cache import get_cached_json, save_cached_json
@@ -538,6 +575,7 @@ def rename_cluster(cluster_id: str, body: RenameClusterRequest):
             f"Failed to auto-associate newly renamed cluster with existing guest: {assoc_err}"
         )
 
+    _bust_people_tab_cache()
     return {"success": True, "cluster_id": cluster_id, "name": new_name}
 
 
@@ -576,6 +614,7 @@ def merge_clusters(body: MergeClusterRequest):
     merges[body.target_id] = new_sources
     save_cached_json("cluster_merges.json", merges)
     log.info(f"Merged clusters {body.source_ids} into target {body.target_id}")
+    _bust_people_tab_cache()
     return {"success": True, "target_id": body.target_id, "merged_sources": new_sources}
 
 
@@ -591,6 +630,7 @@ def unmerge_cluster(cluster_id: str):
         del merges[cluster_id]
         save_cached_json("cluster_merges.json", merges)
         log.info(f"Unmerged cluster {cluster_id}")
+    _bust_people_tab_cache()
     return {"success": True, "cluster_id": cluster_id}
 
 
