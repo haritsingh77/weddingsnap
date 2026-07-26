@@ -62,6 +62,28 @@ def list_households():
     return {"households": out}
 
 
+@router.get("/clusters", dependencies=[Depends(require_admin)])
+def list_all_clusters():
+    """Every face cluster (numeric id + name), for the Families "add member"
+    picker. Also reports which household(s) already include each cluster, so the
+    UI can show "already in <family>"."""
+    clusters = (supabase.table("clusters").select("id, name").order("name").execute()).data or []
+    links = (supabase.table("guest_clusters").select("cluster_id, guest_id").execute()).data or []
+    by_cluster: dict = {}
+    for r in links:
+        by_cluster.setdefault(r["cluster_id"], []).append(r["guest_id"])
+    return {
+        "clusters": [
+            {
+                "cluster_id": c["id"],
+                "name": c.get("name") or f"Person #{c['id']}",
+                "assigned_to": by_cluster.get(c["id"], []),
+            }
+            for c in clusters
+        ]
+    }
+
+
 @router.post("/households/{guest_id}/name", dependencies=[Depends(require_admin)])
 def set_household_name(guest_id: str, body: HouseholdNameBody):
     """Name a family, e.g. "The Ashrafs". Empty clears it (falls back to the owner)."""
