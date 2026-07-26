@@ -402,7 +402,11 @@ export default function Gallery() {
 
     // Re-fetch when tab changes between 'all' and personal tabs
     useEffect(() => {
-        if (!guestId) {
+        // A pure-admin session (admin password, opened from the Admin page) has
+        // no guest link, so there is no guest_id — but it is still a valid way to
+        // browse the whole gallery. Only bounce when there is neither a guest nor
+        // admin: that's a real "not logged in".
+        if (!guestId && !isAdmin) {
             navigate('/')
             return
         }
@@ -417,6 +421,9 @@ export default function Gallery() {
         // big album) which competed with the clusters call, showing "Could not
         // load gallery photos" and starving the People list.
         if (tab !== 'all' && tab !== 'mine' && tab !== 'common') return
+        // Just Me / Group Moments are personal feeds keyed to a guest; a pure
+        // admin has no "me", so there is nothing to fetch for those tabs.
+        if ((tab === 'mine' || tab === 'common') && !guestId) return
         fetchPhotos(1)
     }, [guestId, tab, mediaFilter, navigate]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -990,11 +997,13 @@ export default function Gallery() {
                         <div className="min-w-0">
                             <h1 className="font-serif text-taupe-900 text-lg sm:text-xl tracking-tight leading-tight mb-1 truncate">{eventName || 'Wedding Gallery'}</h1>
                             <p className="text-taupe-400 text-xs tracking-wide truncate">
-                                {myMatchCount === null
-                                    ? 'Finding your moments…'
-                                    : myMatchCount > 0
-                                        ? `${myMatchCount} ${myMatchCount === 1 ? 'moment' : 'moments'} of ${guestName?.split(' ')[0]}`
-                                        : `Browsing all moments · none matched to ${guestName?.split(' ')[0]} yet`}
+                                {!guestId
+                                    ? 'Browsing all moments · admin'
+                                    : myMatchCount === null
+                                        ? 'Finding your moments…'
+                                        : myMatchCount > 0
+                                            ? `${myMatchCount} ${myMatchCount === 1 ? 'moment' : 'moments'} of ${guestName?.split(' ')[0]}`
+                                            : `Browsing all moments · none matched to ${guestName?.split(' ')[0]} yet`}
                             </p>
                         </div>
                     </div>
@@ -1004,12 +1013,17 @@ export default function Gallery() {
                             by the clustering, which a human has already named, so
                             there is nothing for a guest to re-scan — the button
                             only led to a screen that could fail to find a face. */}
-                        <button
-                            onClick={() => { window.location.href = getDownloadAllUrl(guestId) }}
-                            className="bg-taupe-800 text-white text-xs font-semibold px-3 sm:px-4 py-2.5 rounded-xl whitespace-nowrap hover:bg-gold-600 hover:shadow-lg hover:shadow-gold-500/20 transition-all duration-300 cursor-pointer"
-                        >
-                            Download<span className="hidden sm:inline"> All</span>
-                        </button>
+                        {/* Download All zips a specific guest's album. A pure
+                            admin (no guest link) has no album to bundle, so the
+                            button would point at /download/null/all — hide it. */}
+                        {guestId && (
+                            <button
+                                onClick={() => { window.location.href = getDownloadAllUrl(guestId) }}
+                                className="bg-taupe-800 text-white text-xs font-semibold px-3 sm:px-4 py-2.5 rounded-xl whitespace-nowrap hover:bg-gold-600 hover:shadow-lg hover:shadow-gold-500/20 transition-all duration-300 cursor-pointer"
+                            >
+                                Download<span className="hidden sm:inline"> All</span>
+                            </button>
+                        )}
                     </div>
                 </div>
 
