@@ -1316,6 +1316,30 @@ def _prune_encodings_async(targets: list) -> None:
     threading.Thread(target=_work, daemon=True).start()
 
 
+def _purge_faces_for(drive_ids: list) -> None:
+    """Remove the faces-table rows for deleted photos and refresh the cluster
+    caches, so a deleted photo also disappears from the People-tab face folders
+    (which are built from the faces table, not from guest_photos).
+
+    The faces table is the authoritative store, so the deleted photo is gone for
+    good from clustering. The in-memory cluster cache is per-instance (like the
+    rename/merge flows), so other Cloud Run instances refresh on their next
+    rebuild — same behaviour those admin actions already have.
+    """
+    ids = [d for d in drive_ids if d]
+    if not ids:
+        return
+    try:
+        supabase.table("faces").delete().in_("drive_id", ids).execute()
+    except Exception as e:
+        log.warning("faces purge failed for %s: %s", ids, e)
+    try:
+        from app.routes.faces import _bust_people_tab_cache
+        _bust_people_tab_cache()
+    except Exception as e:
+        log.warning("cluster cache bust failed: %s", e)
+
+
 @router.delete("/{drive_id}", dependencies=[Depends(require_admin)])
 async def delete_photo(drive_id: str):
     """
@@ -1408,6 +1432,11 @@ async def delete_photo(drive_id: str):
             # Delete row from photos
             supabase.table("photos").delete().eq("id", photo_db_id).execute()
             log.info(f"Deleted photo record {photo_db_id} (Drive ID: {drive_id}) from Supabase")
+
+        # 6. Purge the face-recognition rows so the photo also leaves the People-tab
+        # face folders (built from the faces table). Without this the deleted photo
+        # lingered in a person's cluster even though it was gone everywhere else.
+        _purge_faces_for([drive_id])
 
         return {"success": True, "message": "Photo deleted and archived successfully"}
         
@@ -1610,8 +1639,10 @@ async def delete_photos_batch(body: DeleteBatchRequest):
             log.error(f"Failed to batch delete from database: {db_del_err}")
             errors.append({"database": str(db_del_err)})
 
-    # Prune the legacy pickle / processed log off the critical path.
+    # Purge faces rows so the photos leave the People-tab folders too, then prune
+    # the legacy pickle / processed log off the critical path.
     if pruned:
+        _purge_faces_for([d for d, _ in pruned])
         _prune_encodings_async(pruned)
 
     return {"success": True, "deleted_count": success_count, "errors": errors}

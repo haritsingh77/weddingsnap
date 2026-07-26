@@ -913,27 +913,24 @@ export default function Gallery() {
     // The "add person" picker is the single tool for "who is in this photo" — it
     // lists recognized faces AND every registered guest, so it also covers guests
     // whose face was never detected (what the old separate "Assign" button did).
-    const openAddPerson = async () => {
+    const openAddPerson = () => {
         setShowAddPerson(true)
         setAddPersonQuery('')
+        // Load both in parallel and DON'T block the picker on either. The guest
+        // list is small and fast, so it shows almost immediately; the recognized
+        // faces (a heavier call) merge in when they arrive. Previously the picker
+        // awaited the slow clusters call first, so it sat empty for seconds.
+        if (guestsList.length === 0) {
+            getGuestsList()
+                .then(res => setGuestsList(res.data || []))
+                .catch(err => console.error('Failed to load guests for add:', err))
+        }
         if (clusters.length === 0 && !loadingClusters) {
             setLoadingClusters(true)
-            try {
-                const res = await getFaceClusters()
-                setClusters(res.data)
-            } catch (err) {
-                console.error('Failed to load people for add:', err)
-            } finally {
-                setLoadingClusters(false)
-            }
-        }
-        if (guestsList.length === 0) {
-            try {
-                const res = await getGuestsList()
-                setGuestsList(res.data)
-            } catch (err) {
-                console.error('Failed to load guests for add:', err)
-            }
+            getFaceClusters()
+                .then(res => setClusters(res.data || []))
+                .catch(err => console.error('Failed to load people for add:', err))
+                .finally(() => setLoadingClusters(false))
         }
     }
 
@@ -2143,12 +2140,7 @@ export default function Gallery() {
                                             className="w-full bg-white/10 text-white text-xs rounded-lg px-3 py-2 mb-2 outline-none placeholder:text-white/30 focus:bg-white/15"
                                         />
                                         <div className="max-h-52 overflow-y-auto flex flex-col gap-0.5">
-                                            {loadingClusters ? (
-                                                <div className="flex items-center justify-center gap-2 px-2 py-4 text-white/40 text-xs">
-                                                    <span className="inline-block w-3 h-3 border border-white/40 border-t-transparent rounded-full animate-spin" />
-                                                    Loading people…
-                                                </div>
-                                            ) : (() => {
+                                            {(() => {
                                                 const shownNames = new Set(photoPeople.map(p => (p.name || '').toLowerCase()))
                                                 const q = addPersonQuery.trim().toLowerCase()
                                                 // Recognized faces first…
@@ -2166,25 +2158,40 @@ export default function Gallery() {
                                                     .filter(o => !q || o.name.toLowerCase().includes(q))
                                                     .sort((a, b) => a.name.localeCompare(b.name))
                                                     .slice(0, 40)
+                                                // Nothing loaded yet — show a spinner only when there is
+                                                // genuinely nothing to show, so a fast guest list isn't
+                                                // held back by the slower recognized-faces call.
                                                 if (options.length === 0) {
-                                                    return <p className="text-white/40 text-xs px-2 py-3 text-center">No matches</p>
+                                                    return (loadingClusters || guestsList.length === 0)
+                                                        ? <div className="flex items-center justify-center gap-2 px-2 py-4 text-white/40 text-xs"><span className="inline-block w-3 h-3 border border-white/40 border-t-transparent rounded-full animate-spin" />Loading people…</div>
+                                                        : <p className="text-white/40 text-xs px-2 py-3 text-center">No matches</p>
                                                 }
-                                                return options.map(c => (
-                                                    <button
-                                                        key={c.id}
-                                                        onClick={() => handleAddPersonToPhoto(c)}
-                                                        disabled={peopleBusyId === c.id}
-                                                        className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/10 text-left transition-colors cursor-pointer disabled:opacity-50"
-                                                    >
-                                                        <FaceAvatar name={c.name} thumbnailUrl={c.thumbnail_url} size={28} />
-                                                        <span className="text-white/85 text-xs font-medium truncate">{c.name}</span>
-                                                        {peopleBusyId === c.id
-                                                            ? <span className="ml-auto shrink-0 inline-block w-3 h-3 border border-white/40 border-t-transparent rounded-full animate-spin" />
-                                                            : typeof c.count === 'number'
-                                                                ? <span className="text-white/30 text-[10px] ml-auto shrink-0">{c.count}</span>
-                                                                : <span className="text-white/25 text-[9px] ml-auto shrink-0 uppercase tracking-wide">guest</span>}
-                                                    </button>
-                                                ))
+                                                return (
+                                                    <>
+                                                        {options.map(c => (
+                                                            <button
+                                                                key={c.id}
+                                                                onClick={() => handleAddPersonToPhoto(c)}
+                                                                disabled={peopleBusyId === c.id}
+                                                                className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/10 text-left transition-colors cursor-pointer disabled:opacity-50"
+                                                            >
+                                                                <FaceAvatar name={c.name} thumbnailUrl={c.thumbnail_url} size={28} />
+                                                                <span className="text-white/85 text-xs font-medium truncate">{c.name}</span>
+                                                                {peopleBusyId === c.id
+                                                                    ? <span className="ml-auto shrink-0 inline-block w-3 h-3 border border-white/40 border-t-transparent rounded-full animate-spin" />
+                                                                    : typeof c.count === 'number'
+                                                                        ? <span className="text-white/30 text-[10px] ml-auto shrink-0">{c.count}</span>
+                                                                        : <span className="text-white/25 text-[9px] ml-auto shrink-0 uppercase tracking-wide">guest</span>}
+                                                            </button>
+                                                        ))}
+                                                        {loadingClusters && (
+                                                            <div className="flex items-center gap-1.5 px-2 py-1.5 text-white/25 text-[10px]">
+                                                                <span className="inline-block w-2.5 h-2.5 border border-white/30 border-t-transparent rounded-full animate-spin" />
+                                                                finding recognized faces…
+                                                            </div>
+                                                        )}
+                                                    </>
+                                                )
                                             })()}
                                         </div>
                                         <button
@@ -2242,7 +2249,10 @@ export default function Gallery() {
                                     )}
                                 </div>
                                 <div className="flex items-center gap-2 flex-wrap justify-end">
-                                    {guestId && !activePhoto.is_common && (
+                                    {/* "Not Me" removes a photo from the viewer's OWN album, so it
+                                        only makes sense on personal feeds. All Moments is the whole
+                                        wedding (and an admin view), so hide it there. */}
+                                    {guestId && !activePhoto.is_common && tab !== 'all' && (
                                         <button
                                             onClick={() => handleNotMePhoto(activePhoto.drive_id)}
                                             className="bg-taupe-800/90 hover:bg-red-950/85 hover:text-red-200 text-taupe-300 border border-taupe-800 hover:border-red-900/60 px-4 py-2.5 rounded-xl text-xs font-semibold transition-all duration-300 flex items-center gap-1.5 cursor-pointer shadow-lg active:scale-95 group/notme"
