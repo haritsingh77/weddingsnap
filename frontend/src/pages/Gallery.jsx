@@ -910,8 +910,9 @@ export default function Gallery() {
 
     // --- Admin: correct who is in a photo (lightbox chips) ---
 
-    // The "add person" picker lists everyone; make sure the cluster list is
-    // loaded even if the admin never opened the People tab.
+    // The "add person" picker is the single tool for "who is in this photo" — it
+    // lists recognized faces AND every registered guest, so it also covers guests
+    // whose face was never detected (what the old separate "Assign" button did).
     const openAddPerson = async () => {
         setShowAddPerson(true)
         setAddPersonQuery('')
@@ -924,6 +925,14 @@ export default function Gallery() {
                 console.error('Failed to load people for add:', err)
             } finally {
                 setLoadingClusters(false)
+            }
+        }
+        if (guestsList.length === 0) {
+            try {
+                const res = await getGuestsList()
+                setGuestsList(res.data)
+            } catch (err) {
+                console.error('Failed to load guests for add:', err)
             }
         }
     }
@@ -2142,10 +2151,20 @@ export default function Gallery() {
                                             ) : (() => {
                                                 const shownNames = new Set(photoPeople.map(p => (p.name || '').toLowerCase()))
                                                 const q = addPersonQuery.trim().toLowerCase()
-                                                const options = clusters
+                                                // Recognized faces first…
+                                                const clusterOpts = clusters
                                                     .filter(c => c.name && !c.name.startsWith('Person #'))
-                                                    .filter(c => !shownNames.has(c.name.toLowerCase()))
-                                                    .filter(c => !q || c.name.toLowerCase().includes(q))
+                                                    .map(c => ({ id: c.id, name: c.name, thumbnail_url: c.thumbnail_url, is_guest: c.is_guest, count: c.count }))
+                                                const clusterNames = new Set(clusterOpts.map(c => c.name.toLowerCase()))
+                                                // …then any registered guest not already covered by a face —
+                                                // this is what the old "Assign" button reached (undetected faces).
+                                                const guestOpts = guestsList
+                                                    .filter(g => g.name && !clusterNames.has(g.name.toLowerCase()))
+                                                    .map(g => ({ id: `guest_${g.id}`, name: g.name, thumbnail_url: `/faces/guests/${g.id}/selfie`, is_guest: true }))
+                                                const options = [...clusterOpts, ...guestOpts]
+                                                    .filter(o => !shownNames.has(o.name.toLowerCase()))
+                                                    .filter(o => !q || o.name.toLowerCase().includes(q))
+                                                    .sort((a, b) => a.name.localeCompare(b.name))
                                                     .slice(0, 40)
                                                 if (options.length === 0) {
                                                     return <p className="text-white/40 text-xs px-2 py-3 text-center">No matches</p>
@@ -2161,7 +2180,9 @@ export default function Gallery() {
                                                         <span className="text-white/85 text-xs font-medium truncate">{c.name}</span>
                                                         {peopleBusyId === c.id
                                                             ? <span className="ml-auto shrink-0 inline-block w-3 h-3 border border-white/40 border-t-transparent rounded-full animate-spin" />
-                                                            : <span className="text-white/30 text-[10px] ml-auto shrink-0">{c.count}</span>}
+                                                            : typeof c.count === 'number'
+                                                                ? <span className="text-white/30 text-[10px] ml-auto shrink-0">{c.count}</span>
+                                                                : <span className="text-white/25 text-[9px] ml-auto shrink-0 uppercase tracking-wide">guest</span>}
                                                     </button>
                                                 ))
                                             })()}
@@ -2182,12 +2203,9 @@ export default function Gallery() {
                                 <div className="flex items-center gap-2 flex-wrap">
                                     {isAdmin && (
                                         <>
-                                            <button
-                                                onClick={() => setShowShareDropdown(true)}
-                                                className="bg-taupe-800 hover:bg-stone-750 text-white px-4 py-2.5 rounded-xl text-xs font-semibold transition-all duration-300 flex items-center gap-1.5 cursor-pointer shadow-lg border border-white/10"
-                                            >
-                                                👤 Assign
-                                            </button>
+                                            {/* "Assign" was retired — adding someone to a photo now
+                                                happens through "People in this photo · ＋ Add person"
+                                                above, which also fixes the recognition and is reversible. */}
                                             {activePhoto.is_common && (
                                                 <button
                                                     onClick={() => handleRemoveFromGroup(activePhoto.drive_id)}
@@ -2383,93 +2401,9 @@ export default function Gallery() {
             )}
 
 
-            {/* SHARE WITH GUEST MODAL */}
-            {showShareDropdown && activePhoto && (
-                <div className="fixed inset-0 z-55 bg-taupe-900/65 backdrop-blur-xs flex items-center justify-center p-4" onClick={() => setShowShareDropdown(false)}>
-                    <div 
-                        className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl border border-gold-200/80 animate-fade-in-up flex flex-col max-h-[75vh]"
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        <div className="px-6 py-4 border-b border-stone-150 flex items-center justify-between">
-                            <div>
-                                <h3 className="font-serif text-lg text-taupe-900 leading-none mb-1">Share with Guest</h3>
-                                <p className="text-taupe-400 text-[11px] leading-tight">Add this photo to a guest's personal album.</p>
-                            </div>
-                            <button
-                                onClick={() => setShowShareDropdown(false)}
-                                className="text-taupe-400 hover:text-stone-705 font-bold text-xl cursor-pointer"
-                            >
-                                &times;
-                            </button>
-                        </div>
-
-                        <div className="p-4 border-b border-gold-100 bg-ivory-100/50">
-                            <input
-                                type="text"
-                                placeholder="🔍 Search guest by name..."
-                                value={shareSearchQuery}
-                                onChange={(e) => setShareSearchQuery(e.target.value)}
-                                className="w-full px-4 py-2 rounded-xl border border-gold-200/60 focus:outline-none focus:border-taupe-400 text-taupe-800 text-sm"
-                                autoFocus
-                            />
-                        </div>
-
-                        <div className="flex-1 overflow-y-auto divide-y divide-stone-100 max-h-[45vh]">
-                            {guestsList.filter(g => g.name.toLowerCase().includes(shareSearchQuery.toLowerCase())).length === 0 ? (
-                                <div className="p-6 text-center text-taupe-400 text-sm font-light">
-                                    No guests found matching your search.
-                                </div>
-                            ) : (
-                                guestsList
-                                    .filter(g => g.name.toLowerCase().includes(shareSearchQuery.toLowerCase()))
-                                    .map(guest => {
-                                        const picked = selectedShareGuests.includes(guest.id)
-                                        return (
-                                        <div
-                                            key={guest.id}
-                                            onClick={() => toggleShareGuest(guest.id)}
-                                            className={`px-6 py-3.5 flex items-center justify-between transition cursor-pointer ${picked ? 'bg-gold-100/60' : 'hover:bg-ivory-100'}`}
-                                        >
-                                            <div className="flex items-center gap-3">
-                                                <div className={`w-5 h-5 rounded-md border flex items-center justify-center text-white text-xs ${picked ? 'bg-taupe-800 border-taupe-800' : 'border-gold-300 bg-white'}`}>
-                                                    {picked ? '✓' : ''}
-                                                </div>
-                                                <div className="w-8 h-8 rounded-full bg-ivory-200 border border-gold-200/60 flex items-center justify-center text-xs font-semibold text-taupe-700 overflow-hidden">
-                                                    <img
-                                                        src={withToken(`${API_BASE}/faces/guests/${guest.id}/selfie`)}
-                                                        alt=""
-                                                        className="w-full h-full object-cover"
-                                                        onError={(e) => { e.target.src = '/logo.png' }}
-                                                    />
-                                                </div>
-                                                <div>
-                                                    <p className="text-sm font-semibold text-taupe-800">{guest.name}</p>
-                                                    <p className="text-[10px] text-taupe-400">{guest.phone || 'No phone number'}</p>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        )
-                                    })
-                            )}
-                        </div>
-
-                        <div className="px-6 py-4 border-t border-stone-150 flex items-center justify-between gap-3">
-                            <span className="text-xs text-taupe-500">
-                                {selectedShareGuests.length === 0
-                                    ? 'Select one or more people'
-                                    : `${selectedShareGuests.length} selected`}
-                            </span>
-                            <button
-                                onClick={() => handleAssignPhoto(activePhoto)}
-                                disabled={selectedShareGuests.length === 0 || sharing}
-                                className="bg-taupe-800 text-white text-xs font-semibold px-5 py-2.5 rounded-xl hover:bg-gold-650 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                            >
-                                {sharing ? 'Assigning…' : `Assign${selectedShareGuests.length ? ` to ${selectedShareGuests.length}` : ''}`}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            {/* The "Share with Guest" modal was retired along with the Assign button:
+                "People in this photo · ＋ Add person" now covers assigning a photo to
+                anyone (recognized face or plain guest) in one place. */}
 
             {/* FLOATING SELECTION CONTROLS AND BATCH TOOLBAR */}
             {/* Floating circular Select Mode FAB — hidden while the lightbox is open
