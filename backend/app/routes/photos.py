@@ -1269,6 +1269,53 @@ def remove_from_album(drive_id: str, body: RemoveFromAlbumBody):
     return {"success": True, "removed": True, "album": album, "remaining": len(categories[album])}
 
 
+def _prune_encodings_async(targets: list) -> None:
+    """Drop deleted photos from the legacy face_encodings.pkl + processed_files.txt
+    in a BACKGROUND thread.
+
+    This is re-matching hygiene only: by the time it runs the photo is already
+    gone from Drive, the filename map and the database, so it must never block the
+    delete response. Doing it inline loaded and re-serialized the whole (large)
+    pickle on every delete — a single delete took minutes and Cloud Run killed the
+    request at its 300s limit, leaving the photo half-deleted. `targets` is a list
+    of (drive_id, filename) tuples.
+    """
+    import threading
+
+    def _work():
+        from app.services.drive_cache import get_cached_file, save_cached_file
+        from app.services.drive_paths import drive_id_from_path
+        drive_ids = {d for d, _ in targets}
+        filenames = {f for _, f in targets if f}
+        try:
+            data = get_cached_file("face_encodings.pkl")
+            if data:
+                enc = pickle.loads(data)
+                kept = [
+                    it for it in enc
+                    if drive_id_from_path(it.get("path", "")) not in drive_ids
+                    and Path(it.get("path", "")).name not in filenames
+                ]
+                if len(kept) != len(enc):
+                    save_cached_file("face_encodings.pkl", pickle.dumps(kept), mime_type="application/octet-stream")
+                    from app.services.face_service import load_encodings
+                    load_encodings.cache_clear()
+                    log.info("Background prune: removed %d encoding(s)", len(enc) - len(kept))
+        except Exception as e:
+            log.error(f"Background encoding prune failed: {e}")
+        try:
+            pdata = get_cached_file("processed_files.txt")
+            if pdata:
+                lines = pdata.decode("utf-8").splitlines()
+                kept = [ln for ln in lines if ln.strip() not in drive_ids and ln.strip() not in filenames]
+                if len(kept) != len(lines):
+                    save_cached_file("processed_files.txt", ("\n".join(kept) + "\n").encode("utf-8"), mime_type="text/plain")
+        except Exception as e:
+            log.error(f"Background processed-log prune failed: {e}")
+
+    threading.Thread(target=_work, daemon=True).start()
+
+
 @router.delete("/{drive_id}", dependencies=[Depends(require_admin)])
 async def delete_photo(drive_id: str):
     """
@@ -1324,30 +1371,9 @@ async def delete_photo(drive_id: str):
         except Exception as e:
             log.warning(f"Failed to delete cached thumbnail for {drive_id}: {e}")
 
-        # 4. Remove entries from face_encodings pickle and processed log in Supabase cache
-        if filename:
-            from app.services.drive_cache import get_cached_file, save_cached_file
-            try:
-                encodings_data = get_cached_file("face_encodings.pkl")
-                if encodings_data:
-                    all_encodings = pickle.loads(encodings_data)
-                    updated_encodings = [item for item in all_encodings if Path(item["path"]).name != filename]
-                    save_cached_file("face_encodings.pkl", pickle.dumps(updated_encodings), mime_type="application/octet-stream")
-                    
-                    from app.services.face_service import load_encodings
-                    load_encodings.cache_clear()
-                    log.info(f"Removed face encodings for {filename} from pickle cache")
-            except Exception as pkl_err:
-                log.error(f"Failed to remove encoding from pickle for {filename}: {pkl_err}")
-
-            try:
-                progress_data = get_cached_file("processed_files.txt")
-                if progress_data:
-                    lines = progress_data.decode("utf-8").splitlines()
-                    updated_lines = [line for line in lines if line.strip() not in (drive_id, filename)]
-                    save_cached_file("processed_files.txt", ("\n".join(updated_lines) + "\n").encode("utf-8"), mime_type="text/plain")
-            except Exception as log_err:
-                log.error(f"Failed to remove from progress log for {filename}: {log_err}")
+        # 4. Prune the legacy face_encodings.pkl + processed log in the background —
+        # loading that pickle inline made deletes take minutes (see helper docstring).
+        _prune_encodings_async([(drive_id, filename)])
 
         # Remove from drive_filename_map.json
         try:
@@ -1499,26 +1525,18 @@ async def delete_photos_batch(body: DeleteBatchRequest):
         log.error(f"Failed to fetch/create temp_delete folder: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to set up deletion folder: {e}")
 
-    # Load face_encodings.pkl and processed_files.txt once
-    all_encodings = []
-    encodings_modified = False
-    try:
-        encodings_data = get_cached_file("face_encodings.pkl")
-        if encodings_data:
-            all_encodings = pickle.loads(encodings_data)
-    except Exception as pkl_err:
-        log.error(f"Failed to load face encodings pickle: {pkl_err}")
+    # face_encodings.pkl / processed_files.txt are pruned AFTER the response, in a
+    # background thread — loading and re-serializing that (large) pickle inline made
+    # even a single-photo delete take minutes and time out on Cloud Run, which left
+    # the photo half-deleted. Here we do only the fast, essential work: move the
+    # file to temp_delete, drop it from the filename map (what All Moments reads),
+    # and delete its DB rows.
+    pruned = []  # (drive_id, filename) tuples actually processed
 
-    processed_lines = []
-    processed_modified = False
-    try:
-        progress_data = get_cached_file("processed_files.txt")
-        if progress_data:
-            processed_lines = progress_data.decode("utf-8").splitlines()
-    except Exception as log_err:
-        log.error(f"Failed to load processed log: {log_err}")
-
-    mapping = get_filename_map()
+    # Read the map FRESH (get_filename_map is lru-cached and could be a stale
+    # per-instance snapshot we'd then re-save, reverting other edits).
+    from app.services.drive_cache import get_cached_json
+    mapping = get_cached_json("drive_filename_map.json") or {}
 
     # Get DB ids for all drive_ids to do a batch DB delete
     try:
@@ -1535,7 +1553,7 @@ async def delete_photos_batch(body: DeleteBatchRequest):
             file_meta = execute_with_retry(lambda svc: svc.files().get(fileId=drive_id, fields='parents, name'))
             previous_parents = ",".join(file_meta.get('parents', []))
             filename = file_meta.get('name')
-            
+
             # Move file on Drive
             if previous_parents:
                 execute_with_retry(lambda svc: svc.files().update(
@@ -1544,7 +1562,7 @@ async def delete_photos_batch(body: DeleteBatchRequest):
                     removeParents=previous_parents,
                     fields='id, parents'
                 ))
-            
+
             # 2. Delete local cached files
             orig_file = ORIGINALS_DIR / drive_id
             if orig_file.exists():
@@ -1552,34 +1570,9 @@ async def delete_photos_batch(body: DeleteBatchRequest):
                     orig_file.unlink()
                 except Exception:
                     pass
-            
             delete_cached_file(f"thumb_{drive_id}_400.jpg")
-            
-            # 3. Filter face encodings — match on Drive id, never on basename.
-            # Over half the corpus shares a basename with a different photo, so
-            # filtering by name would delete unrelated photos' encodings too.
-            if filename:
-                from app.services.drive_paths import drive_id_from_path
 
-                def _record_drive_id(item):
-                    return drive_id_from_path(item["path"]) or mapping.get(
-                        Path(item["path"]).name
-                    )
-
-                initial_enc_len = len(all_encodings)
-                all_encodings = [
-                    item for item in all_encodings if _record_drive_id(item) != drive_id
-                ]
-                if len(all_encodings) < initial_enc_len:
-                    encodings_modified = True
-                
-                # Filter processed_files.txt
-                initial_lines_len = len(processed_lines)
-                processed_lines = [line for line in processed_lines if line.strip() not in (drive_id, filename)]
-                if len(processed_lines) < initial_lines_len:
-                    processed_modified = True
-
-            # Remove from filename mapping
+            # 3. Remove from filename mapping (what All Moments reads)
             if filename and filename in mapping:
                 del mapping[filename]
                 mapping_modified = True
@@ -1590,25 +1583,11 @@ async def delete_photos_batch(body: DeleteBatchRequest):
                         del mapping[k]
                     mapping_modified = True
 
+            pruned.append((drive_id, filename))
             success_count += 1
         except Exception as file_err:
             log.error(f"Error deleting file {drive_id} in batch: {file_err}")
             errors.append({"drive_id": drive_id, "error": str(file_err)})
-
-    # Save modified caches if anything was deleted
-    if encodings_modified:
-        try:
-            save_cached_file("face_encodings.pkl", pickle.dumps(all_encodings), mime_type="application/octet-stream")
-            from app.services.face_service import load_encodings
-            load_encodings.cache_clear()
-        except Exception as pkl_save_err:
-            log.error(f"Failed to save updated face encodings pickle: {pkl_save_err}")
-
-    if processed_modified:
-        try:
-            save_cached_file("processed_files.txt", ("\n".join(processed_lines) + "\n").encode("utf-8"), mime_type="text/plain")
-        except Exception as log_save_err:
-            log.error(f"Failed to save updated progress log: {log_save_err}")
 
     if mapping_modified:
         try:
@@ -1630,6 +1609,10 @@ async def delete_photos_batch(body: DeleteBatchRequest):
         except Exception as db_del_err:
             log.error(f"Failed to batch delete from database: {db_del_err}")
             errors.append({"database": str(db_del_err)})
+
+    # Prune the legacy pickle / processed log off the critical path.
+    if pruned:
+        _prune_encodings_async(pruned)
 
     return {"success": True, "deleted_count": success_count, "errors": errors}
 
