@@ -155,6 +155,18 @@ export const getHouseholds = () =>
 export const setHouseholdName = (guestId, name) =>
   api.post(`/admin/households/${guestId}/name`, { name })
 
+// Every face cluster (numeric id + name) — for the Families "add member" picker.
+export const getAllClusters = () =>
+  api.get('/admin/clusters')
+
+// Add / remove a person (face cluster) on a family's link. This reassigns the
+// cluster: the family album is the union of its members, read from guest_clusters.
+export const addHouseholdMember = (guestId, clusterId, label) =>
+  api.post(`/admin/households/${guestId}/members`, { cluster_id: clusterId, label })
+
+export const removeHouseholdMember = (guestId, clusterId) =>
+  api.delete(`/admin/households/${guestId}/members/${clusterId}`)
+
 // Admin corrections for a single photo. Neither deletes it: the first only
 // clears the is_common flag (drops it out of Group Moments), the second only
 // removes it from one album.

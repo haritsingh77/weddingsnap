@@ -7,6 +7,9 @@ import {
   removeFromAlbum,
   getHouseholds,
   setHouseholdName,
+  getAllClusters,
+  addHouseholdMember,
+  removeHouseholdMember,
   getPhotos,
   getAllPhotos,
   getPhotoPeople,
@@ -304,6 +307,12 @@ export default function Gallery() {
     const [households, setHouseholds] = useState([])
     const [loadingHouseholds, setLoadingHouseholds] = useState(false)
     const [savingFamily, setSavingFamily] = useState(null)
+    // Editing a family's members (reassigning clusters).
+    const [editingFamilyId, setEditingFamilyId] = useState(null)   // guest_id being edited
+    const [allClusters, setAllClusters] = useState([])             // [{cluster_id, name, assigned_to}]
+    const [loadingAllClusters, setLoadingAllClusters] = useState(false)
+    const [memberQuery, setMemberQuery] = useState('')
+    const [familyMemberBusy, setFamilyMemberBusy] = useState(null) // cluster_id mid-update
     // The guest's OWN matched count, independent of the active tab. The header
     // must never show the "All Moments" total (that's every file in the Drive,
     // not photos matched to this guest).
@@ -327,6 +336,11 @@ export default function Gallery() {
     const [downloadingPhoto, setDownloadingPhoto] = useState(null)
     const [deletingPhoto, setDeletingPhoto] = useState(null)   // drive_id being deleted
     const [batchDeleting, setBatchDeleting] = useState(false)
+    // Toasts (success/error feedback) + a reusable confirm modal that replaces
+    // window.confirm / alert for destructive actions.
+    const [toasts, setToasts] = useState([])            // [{ id, msg, type }]
+    const [confirmDialog, setConfirmDialog] = useState(null)  // { title, message, confirmLabel, danger, onConfirm } | null
+    const [confirmBusy, setConfirmBusy] = useState(false)
     const [mediaLoading, setMediaLoading] = useState(true)
     const [photoPeople, setPhotoPeople] = useState([])   // people in current lightbox photo
     const [loadingPeople, setLoadingPeople] = useState(false)
@@ -367,6 +381,27 @@ export default function Gallery() {
     const [showChangePhotoModal, setShowChangePhotoModal] = useState(false)
     const [clusterCacheBuster, setClusterCacheBuster] = useState(Date.now())
     const fetchingPageRef = useRef(0)
+
+    // Transient toast (auto-dismisses). type: 'success' | 'error' | 'info'.
+    const showToast = useCallback((msg, type = 'success') => {
+        const id = Date.now() + Math.random()
+        setToasts(prev => [...prev, { id, msg, type }])
+        setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3400)
+    }, [])
+
+    // Open the reusable confirm modal. `onConfirm` may be async; the modal shows a
+    // busy spinner until it resolves, then closes.
+    const askConfirm = useCallback((opts) => setConfirmDialog(opts), [])
+    const runConfirm = useCallback(async () => {
+        if (!confirmDialog?.onConfirm) { setConfirmDialog(null); return }
+        setConfirmBusy(true)
+        try {
+            await confirmDialog.onConfirm()
+        } finally {
+            setConfirmBusy(false)
+            setConfirmDialog(null)
+        }
+    }, [confirmDialog])
 
     // Reset media loading + clear people on lightbox index change
     useEffect(() => {
@@ -494,11 +529,74 @@ export default function Gallery() {
             await setHouseholdName(guestId_, next.trim())
             setHouseholds(prev => prev.map(h =>
                 h.guest_id === guestId_ ? { ...h, family_name: next.trim() } : h))
+            showToast(next.trim() ? 'Family renamed' : 'Family name cleared')
         } catch (err) {
             console.error('Rename family failed:', err)
-            alert('Could not save that family name.')
+            showToast('Could not save that family name', 'error')
         } finally {
             setSavingFamily(null)
+        }
+    }
+
+    // Open/close the member editor for one family; lazily load the full cluster
+    // list the first time so the "add member" picker has options.
+    const toggleFamilyEdit = (guestId_) => {
+        setMemberQuery('')
+        setEditingFamilyId(prev => (prev === guestId_ ? null : guestId_))
+        if (allClusters.length === 0 && !loadingAllClusters) {
+            setLoadingAllClusters(true)
+            getAllClusters()
+                .then(res => setAllClusters(res.data?.clusters || []))
+                .catch(err => console.error('Failed to load clusters:', err))
+                .finally(() => setLoadingAllClusters(false))
+        }
+    }
+
+    // Add a person (cluster) to a family — reassigns the cluster: the family album
+    // is the union of its members (read from guest_clusters at query time).
+    const handleAddFamilyMember = async (guestId_, cluster) => {
+        setFamilyMemberBusy(cluster.cluster_id)
+        try {
+            const res = await addHouseholdMember(guestId_, cluster.cluster_id, cluster.name)
+            setHouseholds(prev => prev.map(h => h.guest_id === guestId_
+                ? {
+                    ...h,
+                    members: [...h.members, { cluster_id: cluster.cluster_id, label: cluster.name }]
+                        .sort((a, b) => a.label.localeCompare(b.label)),
+                    member_count: res.data?.member_count ?? h.member_count + 1,
+                }
+                : h))
+            setAllClusters(prev => prev.map(c => c.cluster_id === cluster.cluster_id
+                ? { ...c, assigned_to: [...(c.assigned_to || []), guestId_] } : c))
+            setMemberQuery('')
+            showToast(`Added ${cluster.name} to the family`)
+        } catch (err) {
+            console.error('Add family member failed:', err)
+            showToast('Could not add that person', 'error')
+        } finally {
+            setFamilyMemberBusy(null)
+        }
+    }
+
+    const handleRemoveFamilyMember = async (guestId_, member) => {
+        setFamilyMemberBusy(member.cluster_id)
+        try {
+            const res = await removeHouseholdMember(guestId_, member.cluster_id)
+            setHouseholds(prev => prev.map(h => h.guest_id === guestId_
+                ? {
+                    ...h,
+                    members: h.members.filter(m => m.cluster_id !== member.cluster_id),
+                    member_count: res.data?.member_count ?? Math.max(0, h.member_count - 1),
+                }
+                : h))
+            setAllClusters(prev => prev.map(c => c.cluster_id === member.cluster_id
+                ? { ...c, assigned_to: (c.assigned_to || []).filter(g => g !== guestId_) } : c))
+            showToast(`Removed ${member.label} from the family`)
+        } catch (err) {
+            console.error('Remove family member failed:', err)
+            showToast('Could not remove that person', 'error')
+        } finally {
+            setFamilyMemberBusy(null)
         }
     }
 
@@ -821,91 +919,101 @@ export default function Gallery() {
         }
     }
 
-    // Handle photo delete
-    const handleDeletePhoto = async (driveId) => {
-        if (!window.confirm("Are you sure you want to delete this photo/video? This will move it to the temp_delete folder and remove it from the gallery.")) {
-            return
-        }
-        setDeletingPhoto(driveId)
-        try {
-            await deletePhoto(driveId)
-            // Remove from local photos list
-            setPhotos(prev => prev.filter(p => p.drive_id !== driveId))
-            // Also filter in clusterPhotos if active
-            setClusterPhotos(prev => prev.filter(p => p.drive_id !== driveId))
-            // Also filter in categoryPhotos if active
-            setCategoryPhotos(prev => prev.filter(p => p.drive_id !== driveId))
-            // Close lightbox
-            setLightboxIndex(null)
-        } catch (err) {
-            console.error("Failed to delete photo:", err)
-            alert("Failed to delete photo. Please make sure the service account has editor permissions.")
-        } finally {
-            setDeletingPhoto(null)
-        }
+    // Handle photo delete — confirm via the modal, feedback via toast.
+    const handleDeletePhoto = (driveId) => {
+        askConfirm({
+            title: 'Delete this photo?',
+            message: 'It will be moved to a recoverable temp_delete folder and removed from the gallery, albums and face folders.',
+            confirmLabel: 'Delete',
+            danger: true,
+            onConfirm: async () => {
+                setDeletingPhoto(driveId)
+                try {
+                    await deletePhoto(driveId)
+                    setPhotos(prev => prev.filter(p => p.drive_id !== driveId))
+                    setClusterPhotos(prev => prev.filter(p => p.drive_id !== driveId))
+                    setCategoryPhotos(prev => prev.filter(p => p.drive_id !== driveId))
+                    setLightboxIndex(null)
+                    showToast('Photo deleted')
+                } catch (err) {
+                    console.error("Failed to delete photo:", err)
+                    showToast('Could not delete — check the service account has edit access', 'error')
+                } finally {
+                    setDeletingPhoto(null)
+                }
+            },
+        })
     }
 
     // Handle guest-level "Not Me" disassociation action
     // Admin: drop a photo out of Group Moments (clears is_common). The photo is
     // NOT deleted — it stays in the gallery and in the album of whoever is in it.
-    const handleRemoveFromGroup = async (driveId) => {
-        if (!window.confirm("Remove this from Group Moments? It stays in the gallery and in the personal albums of whoever is in it.")) return
-        try {
-            await removeFromGroup(driveId)
-            setPhotos(prev => prev.filter(p => p.drive_id !== driveId))
-            setClusterPhotos(prev => prev.filter(p => p.drive_id !== driveId))
-            setLightboxIndex(null)
-        } catch (err) {
-            console.error('Remove from group failed:', err)
-            alert('Could not remove this from Group Moments.')
-        }
+    const handleRemoveFromGroup = (driveId) => {
+        askConfirm({
+            title: 'Remove from Group Moments?',
+            message: 'It stays in the gallery and in the personal albums of whoever is in it.',
+            confirmLabel: 'Remove',
+            onConfirm: async () => {
+                try {
+                    await removeFromGroup(driveId)
+                    setPhotos(prev => prev.filter(p => p.drive_id !== driveId))
+                    setClusterPhotos(prev => prev.filter(p => p.drive_id !== driveId))
+                    setLightboxIndex(null)
+                    showToast('Removed from Group Moments')
+                } catch (err) {
+                    console.error('Remove from group failed:', err)
+                    showToast('Could not remove from Group Moments', 'error')
+                }
+            },
+        })
     }
 
     // Admin: remove a photo from the album currently being viewed.
-    const handleRemoveFromAlbum = async (driveId, album) => {
+    const handleRemoveFromAlbum = (driveId, album) => {
         if (!album) return
-        if (!window.confirm(`Remove this photo from the "${album}" album? The photo itself is kept.`)) return
-        try {
-            await removeFromAlbum(driveId, album)
-            setCategoryPhotos(prev => prev.filter(p => p.drive_id !== driveId))
-            setPhotos(prev => prev.filter(p => p.drive_id !== driveId))
-            setLightboxIndex(null)
-        } catch (err) {
-            console.error('Remove from album failed:', err)
-            alert('Could not remove this photo from the album.')
-        }
+        askConfirm({
+            title: `Remove from "${album}"?`,
+            message: 'The photo itself is kept — it just leaves this album.',
+            confirmLabel: 'Remove',
+            onConfirm: async () => {
+                try {
+                    await removeFromAlbum(driveId, album)
+                    setCategoryPhotos(prev => prev.filter(p => p.drive_id !== driveId))
+                    setPhotos(prev => prev.filter(p => p.drive_id !== driveId))
+                    setLightboxIndex(null)
+                    showToast(`Removed from ${album}`)
+                } catch (err) {
+                    console.error('Remove from album failed:', err)
+                    showToast('Could not remove from the album', 'error')
+                }
+            },
+        })
     }
 
-    const handleNotMePhoto = async (driveId) => {
-        if (!guestId) return;
-        if (!window.confirm("Is this not you? We will remove this photo from your personal folder and make sure it doesn't get matched to you again.")) {
-            return;
-        }
-        try {
-            await notMePhoto(driveId, guestId);
-            
-            // Remove from local photos list
-            setPhotos(prev => prev.filter(p => p.drive_id !== driveId));
-            // Also filter in clusterPhotos if active
-            setClusterPhotos(prev => prev.filter(p => p.drive_id !== driveId));
-            // Also filter in categoryPhotos if active
-            setCategoryPhotos(prev => prev.filter(p => p.drive_id !== driveId));
-
-            // Adjust lightbox index so the user doesn't get kicked out
-            if (filtered.length <= 1) {
-                // If it was the only photo, close lightbox
-                setLightboxIndex(null);
-            } else if (lightboxIndex >= filtered.length - 1) {
-                // If it was the last photo in the list, go to the previous one
-                setLightboxIndex(filtered.length - 2);
-            } else {
-                // Keep the same index, which now points to the next photo
-                // React will automatically re-render and display the next photo
-            }
-        } catch (err) {
-            console.error("Failed to disassociate photo:", err);
-            alert("Could not process request. Please try again.");
-        }
+    const handleNotMePhoto = (driveId) => {
+        if (!guestId) return
+        askConfirm({
+            title: 'Not you?',
+            message: "We'll remove this photo from your personal folder and stop matching it to you.",
+            confirmLabel: "It's not me",
+            onConfirm: async () => {
+                try {
+                    await notMePhoto(driveId, guestId)
+                    setPhotos(prev => prev.filter(p => p.drive_id !== driveId))
+                    setClusterPhotos(prev => prev.filter(p => p.drive_id !== driveId))
+                    setCategoryPhotos(prev => prev.filter(p => p.drive_id !== driveId))
+                    if (filtered.length <= 1) {
+                        setLightboxIndex(null)
+                    } else if (lightboxIndex >= filtered.length - 1) {
+                        setLightboxIndex(filtered.length - 2)
+                    }
+                    showToast('Removed from your photos')
+                } catch (err) {
+                    console.error("Failed to disassociate photo:", err)
+                    showToast('Could not process that — please try again', 'error')
+                }
+            },
+        })
     }
 
     // --- Admin: correct who is in a photo (lightbox chips) ---
@@ -939,11 +1047,13 @@ export default function Gallery() {
         if (!photo) return
         setPeopleBusyId(personId)
         try {
+            const removed = photoPeople.find(p => p.id === personId)
             await removePersonFromPhoto(photo.drive_id, personId)
             setPhotoPeople(prev => prev.filter(p => p.id !== personId))
+            showToast(removed ? `Removed ${removed.name}` : 'Person removed')
         } catch (err) {
             console.error('Remove person failed:', err)
-            alert('Could not remove this person from the photo.')
+            showToast('Could not remove that person', 'error')
         } finally {
             setPeopleBusyId(null)
         }
@@ -967,9 +1077,10 @@ export default function Gallery() {
             }])
             setShowAddPerson(false)
             setAddPersonQuery('')
+            showToast(`Added ${person.name}`)
         } catch (err) {
             console.error('Add person failed:', err)
-            alert('Could not add this person to the photo.')
+            showToast('Could not add that person', 'error')
         } finally {
             setPeopleBusyId(null)
         }
@@ -1004,28 +1115,33 @@ export default function Gallery() {
         }
     }
 
-    const handleBatchDelete = async () => {
+    const handleBatchDelete = () => {
         if (selectedPhotos.length === 0 || batchDeleting) return
-        if (!window.confirm(`Are you sure you want to delete these ${selectedPhotos.length} photos/videos? This will move them to the temp_delete folder and remove them from the gallery.`)) {
-            return
-        }
-        setBatchDeleting(true)
-        try {
-            await deletePhotosBatch(selectedPhotos)
-            // Remove from local photos list
-            setPhotos(prev => prev.filter(p => !selectedPhotos.includes(p.drive_id)))
-            // Also filter in clusterPhotos if active
-            setClusterPhotos(prev => prev.filter(p => !selectedPhotos.includes(p.drive_id)))
-            // Also filter in categoryPhotos if active
-            setCategoryPhotos(prev => prev.filter(p => !selectedPhotos.includes(p.drive_id)))
-            setIsMultiSelectMode(false)
-            setSelectedPhotos([])
-        } catch (err) {
-            console.error('Failed to delete batch:', err)
-            alert('Failed to delete photos in batch. Please try again.')
-        } finally {
-            setBatchDeleting(false)
-        }
+        const n = selectedPhotos.length
+        askConfirm({
+            title: `Delete ${n} ${n === 1 ? 'item' : 'items'}?`,
+            message: 'They will be moved to a recoverable temp_delete folder and removed from the gallery, albums and face folders.',
+            confirmLabel: `Delete ${n}`,
+            danger: true,
+            onConfirm: async () => {
+                setBatchDeleting(true)
+                const ids = selectedPhotos
+                try {
+                    await deletePhotosBatch(ids)
+                    setPhotos(prev => prev.filter(p => !ids.includes(p.drive_id)))
+                    setClusterPhotos(prev => prev.filter(p => !ids.includes(p.drive_id)))
+                    setCategoryPhotos(prev => prev.filter(p => !ids.includes(p.drive_id)))
+                    setIsMultiSelectMode(false)
+                    setSelectedPhotos([])
+                    showToast(`${n} ${n === 1 ? 'item' : 'items'} deleted`)
+                } catch (err) {
+                    console.error('Failed to delete batch:', err)
+                    showToast('Could not delete the selected items', 'error')
+                } finally {
+                    setBatchDeleting(false)
+                }
+            },
+        })
     }
 
     const handleSetProfilePic = async (driveId) => {
@@ -1487,21 +1603,94 @@ export default function Gallery() {
                                                 link owner: {h.owner} · {h.member_count} {h.member_count === 1 ? 'person' : 'people'}
                                             </p>
                                         </div>
-                                        <button
-                                            onClick={() => handleRenameFamily(h.guest_id, h.family_name, h.owner)}
-                                            disabled={savingFamily === h.guest_id}
-                                            className="shrink-0 bg-white border border-gold-200/60 text-taupe-700 text-[11px] font-semibold px-3 py-1.5 rounded-lg hover:bg-ivory-100 cursor-pointer transition-all"
-                                        >
-                                            {savingFamily === h.guest_id ? 'Saving…' : (h.family_name ? 'Rename' : 'Name it')}
-                                        </button>
+                                        <div className="flex gap-1.5 shrink-0">
+                                            <button
+                                                onClick={() => handleRenameFamily(h.guest_id, h.family_name, h.owner)}
+                                                disabled={savingFamily === h.guest_id}
+                                                className="bg-white border border-gold-200/60 text-taupe-700 text-[11px] font-semibold px-3 py-1.5 rounded-lg hover:bg-ivory-100 cursor-pointer transition-all"
+                                            >
+                                                {savingFamily === h.guest_id ? 'Saving…' : (h.family_name ? 'Rename' : 'Name it')}
+                                            </button>
+                                            <button
+                                                onClick={() => toggleFamilyEdit(h.guest_id)}
+                                                className={`text-[11px] font-semibold px-3 py-1.5 rounded-lg cursor-pointer transition-all border ${editingFamilyId === h.guest_id ? 'bg-taupe-800 text-white border-taupe-800' : 'bg-white text-taupe-700 border-gold-200/60 hover:bg-ivory-100'}`}
+                                            >
+                                                {editingFamilyId === h.guest_id ? 'Done' : 'Edit members'}
+                                            </button>
+                                        </div>
                                     </div>
+
+                                    {/* Member chips — with a ✕ to remove while editing. */}
                                     <div className="flex flex-wrap gap-1.5 mt-3">
+                                        {h.members.length === 0 && (
+                                            <span className="text-[11px] text-taupe-400 italic">No members yet</span>
+                                        )}
                                         {h.members.map(m => (
-                                            <span key={m.cluster_id} className="text-[11px] bg-ivory-100 border border-gold-200/50 text-taupe-600 rounded-full px-2.5 py-1">
+                                            <span key={m.cluster_id} className={`inline-flex items-center gap-1.5 text-[11px] bg-ivory-100 border border-gold-200/50 text-taupe-600 rounded-full pl-2.5 ${editingFamilyId === h.guest_id ? 'pr-1' : 'pr-2.5'} py-1 ${familyMemberBusy === m.cluster_id ? 'opacity-50' : ''}`}>
                                                 {m.label}
+                                                {editingFamilyId === h.guest_id && (
+                                                    <button
+                                                        onClick={() => handleRemoveFamilyMember(h.guest_id, m)}
+                                                        disabled={familyMemberBusy === m.cluster_id}
+                                                        title="Remove from this family"
+                                                        className="w-4 h-4 flex items-center justify-center rounded-full bg-taupe-200/60 hover:bg-red-500 hover:text-white text-taupe-500 text-[10px] leading-none cursor-pointer transition-colors"
+                                                    >
+                                                        {familyMemberBusy === m.cluster_id
+                                                            ? <span className="inline-block w-2 h-2 border border-taupe-400 border-t-transparent rounded-full animate-spin" />
+                                                            : '×'}
+                                                    </button>
+                                                )}
                                             </span>
                                         ))}
                                     </div>
+
+                                    {/* Add-member picker (edit mode). */}
+                                    {editingFamilyId === h.guest_id && (
+                                        <div className="mt-3 pt-3 border-t border-gold-100">
+                                            <input
+                                                autoFocus
+                                                value={memberQuery}
+                                                onChange={e => setMemberQuery(e.target.value)}
+                                                placeholder="Add a person to this family…"
+                                                className="w-full bg-ivory-100/70 border border-gold-200/50 rounded-lg px-3 py-2 text-xs text-taupe-800 outline-none focus:border-taupe-400 placeholder:text-taupe-400"
+                                            />
+                                            <div className="max-h-48 overflow-y-auto mt-1.5 flex flex-col gap-0.5">
+                                                {loadingAllClusters ? (
+                                                    <div className="flex items-center gap-2 px-2 py-3 text-taupe-400 text-xs">
+                                                        <span className="inline-block w-3 h-3 border border-taupe-300 border-t-transparent rounded-full animate-spin" />
+                                                        Loading people…
+                                                    </div>
+                                                ) : (() => {
+                                                    const already = new Set(h.members.map(m => m.cluster_id))
+                                                    const q = memberQuery.trim().toLowerCase()
+                                                    const opts = allClusters
+                                                        .filter(c => !already.has(c.cluster_id))
+                                                        .filter(c => !c.name.startsWith('Person #') || q)  // hide unnamed unless searched
+                                                        .filter(c => !q || c.name.toLowerCase().includes(q))
+                                                        .slice(0, 30)
+                                                    if (opts.length === 0) {
+                                                        return <p className="text-taupe-400 text-xs px-2 py-2 text-center">{q ? 'No matches' : 'Start typing a name…'}</p>
+                                                    }
+                                                    return opts.map(c => {
+                                                        const inOther = (c.assigned_to || []).length > 0
+                                                        return (
+                                                            <button
+                                                                key={c.cluster_id}
+                                                                onClick={() => handleAddFamilyMember(h.guest_id, c)}
+                                                                disabled={familyMemberBusy === c.cluster_id}
+                                                                className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-ivory-100 text-left transition-colors cursor-pointer disabled:opacity-50"
+                                                            >
+                                                                <span className="text-xs font-medium text-taupe-800 truncate">{c.name}</span>
+                                                                {familyMemberBusy === c.cluster_id
+                                                                    ? <span className="ml-auto shrink-0 inline-block w-3 h-3 border border-taupe-400 border-t-transparent rounded-full animate-spin" />
+                                                                    : inOther && <span className="ml-auto shrink-0 text-[9px] text-gold-600 uppercase tracking-wide">in another family</span>}
+                                                            </button>
+                                                        )
+                                                    })
+                                                })()}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             ))}
                         </div>
@@ -2472,6 +2661,71 @@ export default function Gallery() {
                             )}
                         </div>
                     </div>
+                </div>
+            )}
+
+            {/* Confirm modal — replaces window.confirm for destructive actions. */}
+            {confirmDialog && (
+                <div
+                    className="fixed inset-0 z-[60] bg-taupe-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in-up"
+                    onClick={() => { if (!confirmBusy) setConfirmDialog(null) }}
+                >
+                    <div
+                        onClick={e => e.stopPropagation()}
+                        className="bg-white rounded-2xl max-w-sm w-full shadow-2xl border border-gold-200/70 overflow-hidden"
+                    >
+                        <div className="p-6">
+                            <div className="flex items-start gap-3">
+                                <div className={`w-10 h-10 shrink-0 rounded-full flex items-center justify-center text-lg ${confirmDialog.danger ? 'bg-red-50 text-red-600' : 'bg-gold-50 text-gold-600'}`}>
+                                    {confirmDialog.danger ? '🗑️' : '❓'}
+                                </div>
+                                <div className="min-w-0">
+                                    <h3 className="font-serif text-lg text-taupe-900 leading-snug">{confirmDialog.title}</h3>
+                                    {confirmDialog.message && (
+                                        <p className="text-taupe-500 text-[13px] leading-relaxed mt-1.5">{confirmDialog.message}</p>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                        <div className="px-6 py-4 bg-ivory-100/50 border-t border-stone-150 flex items-center justify-end gap-2.5">
+                            <button
+                                onClick={() => { if (!confirmBusy) setConfirmDialog(null) }}
+                                disabled={confirmBusy}
+                                className="text-xs font-semibold text-taupe-600 px-4 py-2.5 rounded-xl hover:bg-white cursor-pointer transition disabled:opacity-50"
+                            >
+                                {confirmDialog.cancelLabel || 'Cancel'}
+                            </button>
+                            <button
+                                onClick={runConfirm}
+                                disabled={confirmBusy}
+                                className={`text-xs font-semibold text-white px-5 py-2.5 rounded-xl cursor-pointer transition flex items-center gap-2 disabled:opacity-70 disabled:cursor-wait ${confirmDialog.danger ? 'bg-red-650 hover:bg-red-750' : 'bg-taupe-800 hover:bg-gold-600'}`}
+                            >
+                                {confirmBusy && <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
+                                {confirmBusy ? 'Working…' : (confirmDialog.confirmLabel || 'Confirm')}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Toast stack — transient success/error feedback. */}
+            {toasts.length > 0 && (
+                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] flex flex-col items-center gap-2 pointer-events-none">
+                    {toasts.map(t => (
+                        <div
+                            key={t.id}
+                            className={`pointer-events-auto flex items-center gap-2.5 px-4 py-2.5 rounded-xl shadow-2xl border text-sm font-medium animate-fade-in-up ${
+                                t.type === 'error'
+                                    ? 'bg-red-650 border-red-750 text-white'
+                                    : t.type === 'info'
+                                        ? 'bg-taupe-800 border-taupe-700 text-white'
+                                        : 'bg-emerald-600 border-emerald-700 text-white'
+                            }`}
+                        >
+                            <span className="text-base leading-none">{t.type === 'error' ? '⚠️' : t.type === 'info' ? 'ℹ️' : '✓'}</span>
+                            {t.msg}
+                        </div>
+                    ))}
                 </div>
             )}
         </>
