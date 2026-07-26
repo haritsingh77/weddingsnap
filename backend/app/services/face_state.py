@@ -55,3 +55,16 @@ def add_disassociation(guest_id: str, photo_id: int) -> None:
         {"guest_id": guest_id, "photo_id": int(photo_id)},
         on_conflict="guest_id,photo_id",
     ).execute()
+
+
+def remove_disassociation(guest_id: str, photo_id: int) -> None:
+    """Undo a disassociation — the admin is asserting this guest IS in the photo.
+
+    Without this, re-adding a person an admin (or the guest) had earlier removed
+    would be silently reversed the next time re-matching honours the block. The
+    legacy JSON is left untouched: it is read-only history, and the table read
+    is what re-matching consults.
+    """
+    supabase.table("guest_photo_disassociations").delete().eq(
+        "guest_id", guest_id
+    ).eq("photo_id", int(photo_id)).execute()

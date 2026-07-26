@@ -771,9 +771,122 @@ def get_people_in_photo(drive_id: str):
             "is_guest":      is_guest,
         })
 
+    # Manual admin corrections for this photo: drop anyone marked "not in this
+    # photo", and append anyone added by hand. Stored in photo_people.json rather
+    # than editing the faces table, so it is reversible and never loses data.
+    overrides = (get_cached_json("photo_people.json") or {}).get(drive_id) or {}
+    removed = set(overrides.get("removed") or [])
+    if removed:
+        results = [r for r in results if r["id"] not in removed]
+    present = {r["id"] for r in results}
+    for a in (overrides.get("added") or []):
+        if a.get("id") and a["id"] not in present:
+            results.append({
+                "id": a["id"],
+                "name": a.get("name") or a["id"],
+                "thumbnail_url": a.get("thumbnail_url")
+                or (f"/faces/guests/{a['id'].replace('guest_','')}/selfie"
+                    if str(a["id"]).startswith("guest_")
+                    else f"/faces/clusters/{a['id']}/thumbnail"),
+                "is_guest": bool(a.get("is_guest")),
+            })
+            present.add(a["id"])
+
     # Sort: named persons first, then by id
     results.sort(key=lambda x: (x["name"].startswith("Person #"), x["name"]))
     return results
+
+
+class AddPersonBody(BaseModel):
+    id: str
+    name: str = ""
+    is_guest: bool = False
+
+
+def _photo_people_overrides() -> dict:
+    from app.services.drive_cache import get_cached_json
+    return get_cached_json("photo_people.json") or {}
+
+
+def _save_photo_people_overrides(data: dict) -> None:
+    from app.services.drive_cache import save_cached_json
+    save_cached_json("photo_people.json", data)
+
+
+def _guests_for_person(person_id: str) -> list:
+    """Guest ids a people-in-photo chip maps to: a 'guest_<id>' chip, or the
+    guests linked to a face cluster via guest_clusters."""
+    if str(person_id).startswith("guest_"):
+        return [person_id.replace("guest_", "")]
+    try:
+        rows = (
+            supabase.table("guest_clusters")
+            .select("guest_id")
+            .eq("cluster_id", int(person_id))
+            .execute()
+        ).data or []
+        return [r["guest_id"] for r in rows]
+    except Exception:
+        return []
+
+
+@router.post("/{drive_id}/people/{person_id}/remove", dependencies=[Depends(require_admin)])
+def remove_person_from_photo(drive_id: str, person_id: str):
+    """Admin: mark that this person is NOT in this photo.
+
+    Drops them from the people list here, and removes the photo from that
+    person's album if the chip maps to a guest (with a disassociation so
+    re-matching won't quietly re-add it). Face rows are untouched — the
+    correction is recorded in photo_people.json and can be reversed.
+    """
+    overrides = _photo_people_overrides()
+    entry = overrides.setdefault(drive_id, {"removed": [], "added": []})
+    if person_id not in entry["removed"]:
+        entry["removed"].append(person_id)
+    entry["added"] = [a for a in entry.get("added", []) if a.get("id") != person_id]
+    _save_photo_people_overrides(overrides)
+
+    photo = supabase.table("photos").select("id").eq("drive_path", drive_id).limit(1).execute().data
+    if photo:
+        pid = photo[0]["id"]
+        from app.services.face_state import add_disassociation
+        for gid in _guests_for_person(person_id):
+            try:
+                supabase.table("guest_photos").delete().eq("guest_id", gid).eq("photo_id", pid).execute()
+                add_disassociation(gid, pid)
+            except Exception as e:
+                log.warning("remove-person album cleanup failed for %s: %s", gid, e)
+    log.info("Admin: removed person %s from photo %s", person_id, drive_id)
+    return {"success": True, "drive_id": drive_id, "removed": person_id}
+
+
+@router.post("/{drive_id}/people/add", dependencies=[Depends(require_admin)])
+def add_person_to_photo(drive_id: str, body: AddPersonBody):
+    """Admin: add a person to this photo's people list, and to their album."""
+    overrides = _photo_people_overrides()
+    entry = overrides.setdefault(drive_id, {"removed": [], "added": []})
+    entry["removed"] = [r for r in entry.get("removed", []) if r != body.id]
+    if not any(a.get("id") == body.id for a in entry["added"]):
+        entry["added"].append({"id": body.id, "name": body.name, "is_guest": body.is_guest})
+    _save_photo_people_overrides(overrides)
+
+    photo = supabase.table("photos").select("id").eq("drive_path", drive_id).limit(1).execute().data
+    if photo:
+        pid = photo[0]["id"]
+        from app.services.face_state import remove_disassociation
+        guests = _guests_for_person(body.id)
+        rows = [{"guest_id": gid, "photo_id": pid} for gid in guests]
+        if rows:
+            try:
+                supabase.table("guest_photos").upsert(rows, on_conflict="guest_id,photo_id").execute()
+                # Clear any prior "Not Me"/remove block, else re-matching would
+                # quietly drop this photo from the album again.
+                for gid in guests:
+                    remove_disassociation(gid, pid)
+            except Exception as e:
+                log.warning("add-person assign failed: %s", e)
+    log.info("Admin: added person %s to photo %s", body.id, drive_id)
+    return {"success": True, "drive_id": drive_id, "added": body.id}
 
 
 def _apply_media(query, column: str, media: str):
