@@ -58,6 +58,18 @@ export const getAllPhotos = (page = 1) =>
 export const getPhotoPeople = (driveId) =>
   api.get(`/photos/${driveId}/people`)
 
+// Admin corrections to who is in a photo. Reversible — recorded in
+// photo_people.json, never by editing the faces table.
+export const removePersonFromPhoto = (driveId, personId) =>
+  api.post(`/photos/${driveId}/people/${personId}/remove`)
+
+export const addPersonToPhoto = (driveId, person) =>
+  api.post(`/photos/${driveId}/people/add`, {
+    id: person.id,
+    name: person.name || '',
+    is_guest: !!person.is_guest,
+  })
+
 
 export const prepareDownload = (guestId) =>
   api.post(`/download/${guestId}/prepare`)

@@ -10,6 +10,8 @@ import {
   getPhotos,
   getAllPhotos,
   getPhotoPeople,
+  removePersonFromPhoto,
+  addPersonToPhoto,
   getFaceClusters,
   getClusterPhotos,
   renameCluster,
@@ -29,8 +31,42 @@ import {
   notMePhoto
 } from '../services/api'
 
-const API_BASE = import.meta.env.VITE_API_URL || 
+const API_BASE = import.meta.env.VITE_API_URL ||
   (typeof window !== 'undefined' && window.location ? `http://${window.location.hostname}:8000` : 'http://localhost:8000')
+
+// Initials for the fallback avatar when a face thumbnail is missing/slow —
+// "Sunita Singh" -> "SS", "Aafrin" -> "A", "Person #18" -> "#".
+const personInitials = (name = '') => {
+  const parts = String(name).trim().split(/\s+/).filter(Boolean)
+  if (!parts.length) return '?'
+  if (parts[0].startsWith('#') || /^Person$/i.test(parts[0])) return '#'
+  return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase()
+}
+
+// Face avatar with an always-visible initials fallback: the initials sit
+// underneath, the photo covers them once it loads, and if it 404s/500s the
+// initials simply remain — so a person is never a blank circle.
+function FaceAvatar({ name, thumbnailUrl, size = 24 }) {
+  const px = { width: size, height: size }
+  return (
+    <span
+      className="relative rounded-full overflow-hidden bg-gradient-to-br from-gold-500/40 to-taupe-500/40 border border-white/20 flex items-center justify-center shrink-0"
+      style={px}
+    >
+      <span className="text-white/75 font-bold" style={{ fontSize: Math.round(size * 0.38) }}>
+        {personInitials(name)}
+      </span>
+      {thumbnailUrl && (
+        <img
+          src={withToken(`${API_BASE}${thumbnailUrl}`)}
+          alt={name}
+          className="absolute inset-0 w-full h-full object-cover"
+          onError={e => { e.target.style.display = 'none' }}
+        />
+      )}
+    </span>
+  )
+}
 
 function GalleryPhotoCard({
     photo,
@@ -289,9 +325,16 @@ export default function Gallery() {
     // Lightbox State
     const [lightboxIndex, setLightboxIndex] = useState(null)
     const [downloadingPhoto, setDownloadingPhoto] = useState(null)
+    const [deletingPhoto, setDeletingPhoto] = useState(null)   // drive_id being deleted
+    const [batchDeleting, setBatchDeleting] = useState(false)
     const [mediaLoading, setMediaLoading] = useState(true)
     const [photoPeople, setPhotoPeople] = useState([])   // people in current lightbox photo
     const [loadingPeople, setLoadingPeople] = useState(false)
+    // Admin correction of the people list: which chip is mid-update, whether the
+    // "add person" picker is open, and its search text.
+    const [peopleBusyId, setPeopleBusyId] = useState(null)
+    const [showAddPerson, setShowAddPerson] = useState(false)
+    const [addPersonQuery, setAddPersonQuery] = useState('')
 
     // Dynamic Categories & Albums states
     const [categories, setCategories] = useState([])
@@ -329,6 +372,9 @@ export default function Gallery() {
     useEffect(() => {
         setMediaLoading(true)
         setPhotoPeople([])
+        setShowAddPerson(false)
+        setAddPersonQuery('')
+        setPeopleBusyId(null)
         if (lightboxIndex !== null && filtered[lightboxIndex]) {
             const driveId = filtered[lightboxIndex].drive_id
             setLoadingPeople(true)
@@ -780,6 +826,7 @@ export default function Gallery() {
         if (!window.confirm("Are you sure you want to delete this photo/video? This will move it to the temp_delete folder and remove it from the gallery.")) {
             return
         }
+        setDeletingPhoto(driveId)
         try {
             await deletePhoto(driveId)
             // Remove from local photos list
@@ -793,6 +840,8 @@ export default function Gallery() {
         } catch (err) {
             console.error("Failed to delete photo:", err)
             alert("Failed to delete photo. Please make sure the service account has editor permissions.")
+        } finally {
+            setDeletingPhoto(null)
         }
     }
 
@@ -859,6 +908,67 @@ export default function Gallery() {
         }
     }
 
+    // --- Admin: correct who is in a photo (lightbox chips) ---
+
+    // The "add person" picker lists everyone; make sure the cluster list is
+    // loaded even if the admin never opened the People tab.
+    const openAddPerson = async () => {
+        setShowAddPerson(true)
+        setAddPersonQuery('')
+        if (clusters.length === 0 && !loadingClusters) {
+            setLoadingClusters(true)
+            try {
+                const res = await getFaceClusters()
+                setClusters(res.data)
+            } catch (err) {
+                console.error('Failed to load people for add:', err)
+            } finally {
+                setLoadingClusters(false)
+            }
+        }
+    }
+
+    const handleRemovePersonFromPhoto = async (personId) => {
+        const photo = filtered[lightboxIndex]
+        if (!photo) return
+        setPeopleBusyId(personId)
+        try {
+            await removePersonFromPhoto(photo.drive_id, personId)
+            setPhotoPeople(prev => prev.filter(p => p.id !== personId))
+        } catch (err) {
+            console.error('Remove person failed:', err)
+            alert('Could not remove this person from the photo.')
+        } finally {
+            setPeopleBusyId(null)
+        }
+    }
+
+    const handleAddPersonToPhoto = async (person) => {
+        const photo = filtered[lightboxIndex]
+        if (!photo) return
+        if (photoPeople.some(p => p.id === person.id)) {
+            setShowAddPerson(false)
+            return
+        }
+        setPeopleBusyId(person.id)
+        try {
+            await addPersonToPhoto(photo.drive_id, person)
+            setPhotoPeople(prev => [...prev, {
+                id: person.id,
+                name: person.name,
+                thumbnail_url: person.thumbnail_url,
+                is_guest: !!person.is_guest,
+            }])
+            setShowAddPerson(false)
+            setAddPersonQuery('')
+        } catch (err) {
+            console.error('Add person failed:', err)
+            alert('Could not add this person to the photo.')
+        } finally {
+            setPeopleBusyId(null)
+        }
+    }
+
     const togglePhotoSelection = (driveId) => {
         setSelectedPhotos(prev => {
             if (prev.includes(driveId)) {
@@ -889,10 +999,11 @@ export default function Gallery() {
     }
 
     const handleBatchDelete = async () => {
-        if (selectedPhotos.length === 0) return
+        if (selectedPhotos.length === 0 || batchDeleting) return
         if (!window.confirm(`Are you sure you want to delete these ${selectedPhotos.length} photos/videos? This will move them to the temp_delete folder and remove them from the gallery.`)) {
             return
         }
+        setBatchDeleting(true)
         try {
             await deletePhotosBatch(selectedPhotos)
             // Remove from local photos list
@@ -906,6 +1017,8 @@ export default function Gallery() {
         } catch (err) {
             console.error('Failed to delete batch:', err)
             alert('Failed to delete photos in batch. Please try again.')
+        } finally {
+            setBatchDeleting(false)
         }
     }
 
@@ -1449,7 +1562,7 @@ export default function Gallery() {
                                                             onClick={handleBatchDelete}
                                                             className="bg-red-650 hover:bg-red-750 text-white text-xs font-semibold px-4 py-2.5 rounded-xl cursor-pointer transition-all flex items-center gap-1.5 shadow-sm"
                                                         >
-                                                            🗑️ Delete ({selectedPhotos.length})
+                                                            {batchDeleting ? '⏳ Deleting…' : `🗑️ Delete (${selectedPhotos.length})`}
                                                         </button>
                                                     )}
                                                 </>
@@ -1595,7 +1708,7 @@ export default function Gallery() {
                                                                 onClick={handleBatchDelete}
                                                                 className="bg-red-650 hover:bg-red-750 text-white text-xs font-semibold px-4 py-2.5 rounded-xl cursor-pointer transition-all flex items-center gap-1.5 shadow-sm"
                                                             >
-                                                                🗑️ Delete ({selectedPhotos.length})
+                                                                {batchDeleting ? '⏳ Deleting…' : `🗑️ Delete (${selectedPhotos.length})`}
                                                             </button>
                                                         )}
                                                     </>
@@ -1668,7 +1781,7 @@ export default function Gallery() {
                                                                 onClick={handleBatchDelete}
                                                                 className="bg-red-650 hover:bg-red-750 text-white text-xs font-semibold px-4 py-2.5 rounded-xl cursor-pointer transition-all flex items-center gap-1.5 shadow-sm"
                                                             >
-                                                                🗑️ Delete ({selectedPhotos.length})
+                                                                {batchDeleting ? '⏳ Deleting…' : `🗑️ Delete (${selectedPhotos.length})`}
                                                             </button>
                                                         )}
                                                     </>
@@ -1860,12 +1973,26 @@ export default function Gallery() {
                     onClick={() => setLightboxIndex(null)}
                 >
                     {/* Close Button */}
-                    <button 
+                    <button
                         onClick={() => setLightboxIndex(null)}
                         className="absolute top-4 right-4 z-50 w-10 h-10 rounded-full bg-white/10 text-white hover:bg-white/20 flex items-center justify-center transition-all duration-300 cursor-pointer text-lg font-light"
                     >
                         ✕
                     </button>
+
+                    {/* Media badge — moved to the top-left corner so it no longer sits on
+                        top of the people chips the way the old bottom caption did. */}
+                    <div
+                        onClick={(e) => e.stopPropagation()}
+                        className="absolute top-4 left-4 z-50 flex items-center gap-2 bg-black/35 backdrop-blur-md border border-white/10 rounded-full pl-3 pr-3.5 py-1.5 text-xs text-white/70"
+                    >
+                        <span className="w-1.5 h-1.5 rounded-full bg-gold-400"></span>
+                        <span className="font-semibold text-white/90">
+                            {activePhoto.is_video ? 'Video' : activePhoto.is_common ? 'Group' : 'Personal'}
+                        </span>
+                        <span className="text-white/40">·</span>
+                        <span className="tabular-nums text-white/60">{lightboxIndex + 1} / {filtered.length}</span>
+                    </div>
 
                     {/* Left Navigation Arrow */}
                     {lightboxIndex > 0 && (
@@ -1919,125 +2046,213 @@ export default function Gallery() {
                             />
                         )}
                         
-                        {/* Caption & controls — pinned to the bottom-right of the screen,
-                            shown only once the full-quality preview has finished loading. */}
+                        {/* Bottom dock — people and actions in ONE anchored panel. The old
+                            layout floated the controls bottom-right while the people chips
+                            ran in-flow underneath them, so on a big group photo the two
+                            overlapped. Here people sit on top, actions below a hairline, and
+                            the media badge has moved to the top-left of the overlay. */}
                         {!mediaLoading && (
                         <div
                             onClick={(e) => e.stopPropagation()}
-                            className="fixed bottom-5 right-5 z-50 flex flex-wrap items-center justify-end text-white gap-3 bg-taupe-900/70 backdrop-blur-md rounded-2xl px-4 py-3 shadow-2xl border border-white/10 max-w-[calc(100vw-2.5rem)]">
-                            <div className="text-xs min-w-0 mr-1">
-                                <span className="font-semibold uppercase tracking-wider text-gold-400 block truncate">
-                                    {activePhoto.is_video ? '🎥 Video' : activePhoto.is_common ? '👥 Group Moment' : '👤 Personal Moment'}
-                                </span>
-                                {/* Position in the set — the raw Drive file id used to be
-                                    shown here, which is meaningless to a guest. */}
-                                <p className="text-white/50 mt-1 text-[11px] truncate">
-                                    {lightboxIndex + 1} of {filtered.length}
-                                </p>
-                            </div>
+                            className="fixed bottom-0 left-0 right-0 z-50 px-3 sm:px-5 pt-8 pb-4 bg-gradient-to-t from-taupe-900/96 via-taupe-900/85 to-transparent"
+                        >
+                          <div className="max-w-5xl mx-auto flex flex-col gap-2.5 text-white">
 
-                            <div className="flex items-center gap-2 flex-shrink-0">
-                                {isAdmin && (
-                                    <>
-                                        <button
-                                            onClick={() => setShowShareDropdown(true)}
-                                            className="bg-taupe-800 hover:bg-stone-750 text-white px-4 py-2.5 rounded-xl text-xs font-semibold transition-all duration-300 flex items-center gap-1.5 cursor-pointer shadow-lg border border-white/10"
-                                        >
-                                            👤 Assign
-                                        </button>
-                                        {activePhoto.is_common && (
-                                            <button
-                                                onClick={() => handleRemoveFromGroup(activePhoto.drive_id)}
-                                                title="Takes it out of Group Moments — the photo is kept"
-                                                className="bg-taupe-800/90 hover:bg-stone-750 text-white px-4 py-2.5 rounded-xl text-xs font-semibold transition-all duration-300 flex items-center gap-1.5 cursor-pointer shadow-lg border border-white/10"
-                                            >
-                                                👥 Not a group photo
-                                            </button>
-                                        )}
-                                        {selectedCategory && (
-                                            <button
-                                                onClick={() => handleRemoveFromAlbum(activePhoto.drive_id, selectedCategory)}
-                                                title={`Remove from the "${selectedCategory}" album — the photo is kept`}
-                                                className="bg-taupe-800/90 hover:bg-stone-750 text-white px-4 py-2.5 rounded-xl text-xs font-semibold transition-all duration-300 flex items-center gap-1.5 cursor-pointer shadow-lg border border-white/10"
-                                            >
-                                                🗂️ Remove from album
-                                            </button>
-                                        )}
-                                        <button
-                                            onClick={() => handleDeletePhoto(activePhoto.drive_id)}
-                                            className="bg-red-650 hover:bg-red-750 text-white px-4 py-2.5 rounded-xl text-xs font-semibold transition-all duration-300 flex items-center gap-1.5 cursor-pointer shadow-lg"
-                                        >
-                                            🗑️ Delete
-                                        </button>
-                                    </>
-                                )}
-                                {guestId && !activePhoto.is_common && (
-                                    <button 
-                                        onClick={() => handleNotMePhoto(activePhoto.drive_id)}
-                                        className="bg-taupe-800/90 hover:bg-red-950/85 hover:text-red-200 text-taupe-300 border border-taupe-800 hover:border-red-900/60 px-4 py-2.5 rounded-xl text-xs font-semibold transition-all duration-300 flex items-center gap-1.5 cursor-pointer shadow-lg active:scale-95 group/notme"
-                                    >
-                                        <span className="transition-transform duration-200 group-hover/notme:scale-110">🙅‍♂️</span> Not Me
-                                    </button>
-                                )}
-                                <button 
-                                    onClick={() => downloadSinglePhoto(activePhoto)}
-                                    className="bg-white text-taupe-900 px-4 py-2.5 rounded-xl text-xs font-semibold hover:bg-gold-500 hover:text-white transition-all duration-300 flex items-center gap-1.5 cursor-pointer shadow-lg"
-                                    disabled={downloadingPhoto === activePhoto.drive_id}
-                                >
-                                    {downloadingPhoto === activePhoto.drive_id ? (
-                                        <>
-                                            <span className="w-3.5 h-3.5 border-2 border-stone-850/30 border-t-stone-850 rounded-full animate-spin"></span>
-                                            Downloading...
-                                        </>
-                                    ) : (
-                                        <>
-                                            <span>⬇</span> Download {activePhoto.is_video ? 'Video' : 'Photo'}
-                                        </>
-                                    )}
-                                </button>
-                            </div>
-                        </div>
-                        )}
-                        {/* People in this photo — only once the preview has loaded, so the
-                            skeleton doesn't flash mid-screen during the wait. */}
-                        {!mediaLoading && (loadingPeople || photoPeople.length > 0) && (
-                            <div className="w-full mt-3 px-2" onClick={e => e.stopPropagation()}>
+                            {/* People row */}
+                            {(loadingPeople || photoPeople.length > 0 || isAdmin) && (
+                            <div className="relative">
                                 <p className="text-[9px] uppercase tracking-widest text-white/30 font-semibold mb-2">
                                     People in this photo
+                                    {isAdmin && <span className="text-white/20 normal-case tracking-normal"> · tap ✕ to correct</span>}
                                 </p>
-                                <div className="flex flex-wrap gap-2">
+                                {/* One horizontally-scrolling row so a big group photo's chips
+                                    stay on a single tidy line instead of wrapping into the dock. */}
+                                <div className="flex flex-nowrap gap-2 items-center overflow-x-auto pb-1 [scrollbar-width:thin]">
                                     {loadingPeople ? (
                                         [...Array(3)].map((_, i) => (
-                                            <div key={i} className="flex items-center gap-1.5 bg-white/5 rounded-full px-3 py-1.5 animate-pulse">
+                                            <div key={i} className="flex items-center gap-1.5 bg-white/5 rounded-full px-3 py-1.5 animate-pulse shrink-0">
                                                 <div className="w-6 h-6 rounded-full bg-white/10" />
                                                 <div className="w-14 h-2.5 bg-white/10 rounded" />
                                             </div>
                                         ))
                                     ) : (
-                                        photoPeople.map(person => (
-                                            <button
-                                                key={person.id}
-                                                onClick={() => {
-                                                    setLightboxIndex(null)
-                                                    setTab('people')
-                                                    handleClusterClick(person.id)
-                                                }}
-                                                className="flex items-center gap-1.5 bg-white/8 hover:bg-white/15 border border-white/10 hover:border-gold-400/40 rounded-full px-3 py-1.5 transition-all duration-200 cursor-pointer group"
-                                            >
-                                                <img
-                                                    src={withToken(`${API_BASE}${person.thumbnail_url}`)}
-                                                    alt={person.name}
-                                                    className="w-6 h-6 rounded-full object-cover border border-white/20"
-                                                    onError={e => { e.target.style.display = 'none' }}
-                                                />
-                                                <span className="text-[11px] font-semibold text-white/80 group-hover:text-gold-300 transition-colors whitespace-nowrap">
-                                                    {person.name}
-                                                </span>
-                                            </button>
-                                        ))
+                                        <>
+                                            {photoPeople.map(person => (
+                                                <div
+                                                    key={person.id}
+                                                    className={`flex items-center gap-1.5 bg-white/8 hover:bg-white/15 border border-white/10 hover:border-gold-400/40 rounded-full pl-1.5 ${isAdmin ? 'pr-1.5' : 'pr-3'} py-1 shrink-0 transition-all duration-200 group ${peopleBusyId === person.id ? 'opacity-50' : ''}`}
+                                                >
+                                                    <button
+                                                        onClick={() => {
+                                                            setLightboxIndex(null)
+                                                            setTab('people')
+                                                            handleClusterClick(person.id)
+                                                        }}
+                                                        className="flex items-center gap-1.5 cursor-pointer"
+                                                    >
+                                                        <FaceAvatar name={person.name} thumbnailUrl={person.thumbnail_url} size={26} />
+                                                        <span className="text-[11px] font-semibold text-white/80 group-hover:text-gold-300 transition-colors whitespace-nowrap">
+                                                            {person.name}
+                                                        </span>
+                                                    </button>
+                                                    {isAdmin && (
+                                                        <button
+                                                            onClick={() => handleRemovePersonFromPhoto(person.id)}
+                                                            disabled={peopleBusyId === person.id}
+                                                            title="Not in this photo — remove"
+                                                            className="w-5 h-5 flex items-center justify-center rounded-full bg-white/10 hover:bg-red-500/80 text-white/60 hover:text-white text-xs leading-none transition-colors cursor-pointer"
+                                                        >
+                                                            {peopleBusyId === person.id ? (
+                                                                <span className="inline-block w-2.5 h-2.5 border border-white/50 border-t-transparent rounded-full animate-spin" />
+                                                            ) : '×'}
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            ))}
+                                            {!loadingPeople && photoPeople.length === 0 && !isAdmin && null}
+                                            {isAdmin && (
+                                                <button
+                                                    onClick={openAddPerson}
+                                                    className="flex items-center gap-1 bg-gold-500/15 hover:bg-gold-500/30 border border-gold-400/30 hover:border-gold-400/60 text-gold-200 rounded-full px-3 py-1.5 text-[11px] font-semibold transition-all duration-200 cursor-pointer whitespace-nowrap shrink-0"
+                                                >
+                                                    <span className="text-sm leading-none">＋</span> Add person
+                                                </button>
+                                            )}
+                                        </>
                                     )}
                                 </div>
+
+                                {/* Admin add-person picker — floats ABOVE the row (the row sits
+                                    at the bottom edge of the screen, so a dropdown would be off-screen). */}
+                                {isAdmin && showAddPerson && (
+                                    <div className="absolute bottom-full left-2 mb-2 z-10 w-72 bg-taupe-900/95 backdrop-blur-md border border-white/15 rounded-xl p-2 shadow-2xl">
+                                        <input
+                                            autoFocus
+                                            value={addPersonQuery}
+                                            onChange={e => setAddPersonQuery(e.target.value)}
+                                            placeholder="Search people to add…"
+                                            className="w-full bg-white/10 text-white text-xs rounded-lg px-3 py-2 mb-2 outline-none placeholder:text-white/30 focus:bg-white/15"
+                                        />
+                                        <div className="max-h-52 overflow-y-auto flex flex-col gap-0.5">
+                                            {loadingClusters ? (
+                                                <div className="flex items-center justify-center gap-2 px-2 py-4 text-white/40 text-xs">
+                                                    <span className="inline-block w-3 h-3 border border-white/40 border-t-transparent rounded-full animate-spin" />
+                                                    Loading people…
+                                                </div>
+                                            ) : (() => {
+                                                const shownNames = new Set(photoPeople.map(p => (p.name || '').toLowerCase()))
+                                                const q = addPersonQuery.trim().toLowerCase()
+                                                const options = clusters
+                                                    .filter(c => c.name && !c.name.startsWith('Person #'))
+                                                    .filter(c => !shownNames.has(c.name.toLowerCase()))
+                                                    .filter(c => !q || c.name.toLowerCase().includes(q))
+                                                    .slice(0, 40)
+                                                if (options.length === 0) {
+                                                    return <p className="text-white/40 text-xs px-2 py-3 text-center">No matches</p>
+                                                }
+                                                return options.map(c => (
+                                                    <button
+                                                        key={c.id}
+                                                        onClick={() => handleAddPersonToPhoto(c)}
+                                                        disabled={peopleBusyId === c.id}
+                                                        className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/10 text-left transition-colors cursor-pointer disabled:opacity-50"
+                                                    >
+                                                        <FaceAvatar name={c.name} thumbnailUrl={c.thumbnail_url} size={28} />
+                                                        <span className="text-white/85 text-xs font-medium truncate">{c.name}</span>
+                                                        {peopleBusyId === c.id
+                                                            ? <span className="ml-auto shrink-0 inline-block w-3 h-3 border border-white/40 border-t-transparent rounded-full animate-spin" />
+                                                            : <span className="text-white/30 text-[10px] ml-auto shrink-0">{c.count}</span>}
+                                                    </button>
+                                                ))
+                                            })()}
+                                        </div>
+                                        <button
+                                            onClick={() => { setShowAddPerson(false); setAddPersonQuery('') }}
+                                            className="w-full mt-1.5 text-white/40 hover:text-white/70 text-[11px] py-1 transition-colors cursor-pointer"
+                                        >
+                                            Close
+                                        </button>
+                                    </div>
+                                )}
                             </div>
+                            )}
+
+                            {/* Action bar — edit actions on the left, primary Download on the right. */}
+                            <div className="flex items-center justify-between gap-2 flex-wrap pt-2.5 border-t border-white/10">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    {isAdmin && (
+                                        <>
+                                            <button
+                                                onClick={() => setShowShareDropdown(true)}
+                                                className="bg-taupe-800 hover:bg-stone-750 text-white px-4 py-2.5 rounded-xl text-xs font-semibold transition-all duration-300 flex items-center gap-1.5 cursor-pointer shadow-lg border border-white/10"
+                                            >
+                                                👤 Assign
+                                            </button>
+                                            {activePhoto.is_common && (
+                                                <button
+                                                    onClick={() => handleRemoveFromGroup(activePhoto.drive_id)}
+                                                    title="Takes it out of Group Moments — the photo is kept"
+                                                    className="bg-taupe-800/90 hover:bg-stone-750 text-white px-4 py-2.5 rounded-xl text-xs font-semibold transition-all duration-300 flex items-center gap-1.5 cursor-pointer shadow-lg border border-white/10"
+                                                >
+                                                    👥 Not a group photo
+                                                </button>
+                                            )}
+                                            {selectedCategory && (
+                                                <button
+                                                    onClick={() => handleRemoveFromAlbum(activePhoto.drive_id, selectedCategory)}
+                                                    title={`Remove from the "${selectedCategory}" album — the photo is kept`}
+                                                    className="bg-taupe-800/90 hover:bg-stone-750 text-white px-4 py-2.5 rounded-xl text-xs font-semibold transition-all duration-300 flex items-center gap-1.5 cursor-pointer shadow-lg border border-white/10"
+                                                >
+                                                    🗂️ Remove from album
+                                                </button>
+                                            )}
+                                            <button
+                                                onClick={() => handleDeletePhoto(activePhoto.drive_id)}
+                                                disabled={deletingPhoto === activePhoto.drive_id}
+                                                className="bg-red-650 hover:bg-red-750 text-white px-4 py-2.5 rounded-xl text-xs font-semibold transition-all duration-300 flex items-center gap-1.5 cursor-pointer shadow-lg disabled:opacity-70 disabled:cursor-wait"
+                                            >
+                                                {deletingPhoto === activePhoto.drive_id ? (
+                                                    <>
+                                                        <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin"></span>
+                                                        Deleting…
+                                                    </>
+                                                ) : (
+                                                    <>🗑️ Delete</>
+                                                )}
+                                            </button>
+                                        </>
+                                    )}
+                                </div>
+                                <div className="flex items-center gap-2 flex-wrap justify-end">
+                                    {guestId && !activePhoto.is_common && (
+                                        <button
+                                            onClick={() => handleNotMePhoto(activePhoto.drive_id)}
+                                            className="bg-taupe-800/90 hover:bg-red-950/85 hover:text-red-200 text-taupe-300 border border-taupe-800 hover:border-red-900/60 px-4 py-2.5 rounded-xl text-xs font-semibold transition-all duration-300 flex items-center gap-1.5 cursor-pointer shadow-lg active:scale-95 group/notme"
+                                        >
+                                            <span className="transition-transform duration-200 group-hover/notme:scale-110">🙅‍♂️</span> Not Me
+                                        </button>
+                                    )}
+                                    <button
+                                        onClick={() => downloadSinglePhoto(activePhoto)}
+                                        className="bg-white text-taupe-900 px-4 py-2.5 rounded-xl text-xs font-semibold hover:bg-gold-500 hover:text-white transition-all duration-300 flex items-center gap-1.5 cursor-pointer shadow-lg"
+                                        disabled={downloadingPhoto === activePhoto.drive_id}
+                                    >
+                                        {downloadingPhoto === activePhoto.drive_id ? (
+                                            <>
+                                                <span className="w-3.5 h-3.5 border-2 border-stone-850/30 border-t-stone-850 rounded-full animate-spin"></span>
+                                                Downloading...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <span>⬇</span> Download {activePhoto.is_video ? 'Video' : 'Photo'}
+                                            </>
+                                        )}
+                                    </button>
+                                </div>
+                            </div>
+
+                          </div>
+                        </div>
                         )}
                     </div>
 
@@ -2303,9 +2518,10 @@ export default function Gallery() {
                                     {isAdmin && (
                                         <button
                                             onClick={handleBatchDelete}
-                                            className="bg-red-650 hover:bg-red-750 text-white text-xs font-bold px-3 py-2 rounded-xl transition-all flex items-center gap-1 cursor-pointer shadow-md whitespace-nowrap"
+                                            disabled={batchDeleting}
+                                            className="bg-red-650 hover:bg-red-750 text-white text-xs font-bold px-3 py-2 rounded-xl transition-all flex items-center gap-1 cursor-pointer shadow-md whitespace-nowrap disabled:opacity-70 disabled:cursor-wait"
                                         >
-                                            🗑️ Delete
+                                            {batchDeleting ? '⏳ Deleting…' : '🗑️ Delete'}
                                         </button>
                                     )}
                                 </>
