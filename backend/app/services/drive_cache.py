@@ -88,7 +88,9 @@ def save_cached_file(filename: str, data: bytes, mime_type: str = "image/jpeg"):
     # quietly vanished.
     is_config = filename.endswith(".json")
 
-    if is_thumbnail or is_config:
+    if is_thumbnail:
+        # Thumbnails are immutable and read-through-cached, so a background
+        # upload is fine — losing one just re-generates on the next request.
         import threading
         def _upload():
             try:
@@ -106,6 +108,11 @@ def save_cached_file(filename: str, data: bytes, mime_type: str = "image/jpeg"):
                 log.error(f"Failed to upload '{filename}' to Supabase Storage in background: {upload_err}")
         threading.Thread(target=_upload, daemon=True).start()
     else:
+        # Config JSON and everything else upload SYNCHRONOUSLY: the admin action
+        # that triggered the write (delete, rename, album edit) must be durable
+        # and visible to the other instances before the request returns. A
+        # background thread could be killed on instance shutdown and silently
+        # lose the change, or lose the race against another instance's re-pull.
         try:
             supabase.storage.from_(BUCKET_NAME).upload(
                 path=filename,
@@ -117,6 +124,8 @@ def save_cached_file(filename: str, data: bytes, mime_type: str = "image/jpeg"):
                 }
             )
             log.debug(f"Saved '{filename}' to Supabase Storage")
+            if is_config:
+                _mark_json_fresh(filename)  # our L1 copy is now authoritative
         except Exception as e:
             log.error(f"Failed to upload '{filename}' to Supabase Storage: {e}")
 
@@ -139,8 +148,42 @@ def delete_cached_file(filename: str):
 
 # ── JSON helpers (for cluster_names.json etc.) ────────────────────────────────
 
+# Config JSON (drive_filename_map, categories, household/cluster names,
+# photo_people…) is MUTATED at runtime and lives on several Cloud Run instances
+# at once. get_cached_file serves each instance's own /tmp copy first and never
+# refreshes it, so a delete / rename / album edit on one instance stayed
+# invisible to the others — most visibly, a batch-deleted photo reappeared in
+# "All Moments" on the next page load because /photos/all read a stale map.
+# Re-pull config JSON from Storage (authoritative) at most once per TTL, which
+# bounds cross-instance staleness to a few seconds without hammering Storage.
+_JSON_TTL_SECONDS = 15
+_json_fetched_at: dict[str, float] = {}
+
+
+def _mark_json_fresh(filename: str) -> None:
+    """A local save just wrote the authoritative copy — no need to re-pull yet."""
+    import time
+    _json_fetched_at[filename] = time.time()
+
+
 def get_cached_json(filename: str) -> Optional[dict]:
-    """Load a JSON file from Supabase Storage. Returns dict or None."""
+    """Load a JSON file, refreshing from Supabase Storage on a short TTL so
+    runtime edits on other instances become visible. Returns dict or None."""
+    import time
+    now = time.time()
+    if now - _json_fetched_at.get(filename, 0.0) >= _JSON_TTL_SECONDS:
+        try:
+            data = supabase.storage.from_(BUCKET_NAME).download(filename)
+            _json_fetched_at[filename] = now
+            try:
+                (LOCAL_CACHE_DIR / filename).write_bytes(data)  # keep L1 consistent
+            except Exception:
+                pass
+            return json.loads(data.decode("utf-8"))
+        except Exception as e:
+            # Not in Storage yet (or transient) — fall back to the L1 copy.
+            log.debug(f"JSON '{filename}' Storage refresh failed, using L1: {e}")
+
     data = get_cached_file(filename)
     if data is None:
         return None
