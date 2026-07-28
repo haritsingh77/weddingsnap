@@ -498,12 +498,12 @@ def match_guest_selfie(
 from app.services.drive_service import build_filename_to_id_map
 
 
-@lru_cache(maxsize=1)
 def get_filename_map() -> dict:
-    log.info("Building filename → Drive ID map...")
-    mapping = build_filename_to_id_map()
-    log.info("Mapped %s files", f"{len(mapping):,}")
-    return mapping
+    # NOT lru-cached: build_filename_to_id_map reads the drive_filename_map.json
+    # cache, which get_cached_json already refreshes on a short TTL. An lru_cache
+    # here pinned the map for the life of the instance, so deleted files kept
+    # resolving (and reappearing in face folders) until the process restarted.
+    return build_filename_to_id_map()
 
 
 def _expand_via_clusters(supabase, best: dict[str, float], tolerance: float,

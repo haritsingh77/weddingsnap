@@ -143,6 +143,12 @@ def _cluster_faces_scalable(X: np.ndarray, threshold: float, backend: str) -> np
 
 _VIDEO_EXTS = (".mp4", ".mov", ".avi", ".mkv", ".webm")
 _db_clusters_cache: dict | None = None
+_db_clusters_at: float = 0.0
+# The cluster map is cached in-process (rebuilding from the faces table is a
+# multi-second read). Without a TTL it lived for the whole instance, so a delete
+# or rename on ANOTHER instance never showed here — a deleted photo lingered in
+# its face folder. A short TTL makes every instance rebuild within a minute.
+_DB_CLUSTERS_TTL = 60.0
 
 
 def _clusters_from_db() -> dict | None:
@@ -157,8 +163,9 @@ def _clusters_from_db() -> dict | None:
     Returns None when the table is empty, so a machine with only a pkl (i.e. the
     preprocessing box) still falls through to the in-memory path below.
     """
-    global _db_clusters_cache
-    if _db_clusters_cache is not None:
+    global _db_clusters_cache, _db_clusters_at
+    import time
+    if _db_clusters_cache is not None and (time.time() - _db_clusters_at) < _DB_CLUSTERS_TTL:
         return _db_clusters_cache
 
     from app.services.drive_paths import drive_record_path
@@ -221,6 +228,7 @@ def _clusters_from_db() -> dict | None:
     result = dict(sorted(result.items(), key=lambda kv: kv[1]["count"], reverse=True))
     log.info("Clusters from DB: %d people, %d faces", len(result), len(rows))
     _db_clusters_cache = result
+    _db_clusters_at = time.time()
     return result
 
 

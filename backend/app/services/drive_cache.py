@@ -118,7 +118,11 @@ def save_cached_file(filename: str, data: bytes, mime_type: str = "image/jpeg"):
                 path=filename,
                 file=data,
                 file_options={
-                    "cache-control": "3600",
+                    # Config JSON is MUTATED at runtime — it must never be cached,
+                    # or another instance's download serves a stale copy for up to
+                    # an hour (deleted photos / removed people reappear). "0" =
+                    # always fetch the fresh object.
+                    "cache-control": "0" if is_config else "3600",
                     "upsert": "true",
                     "content-type": mime_type
                 }
