@@ -340,7 +340,6 @@ export default function Gallery() {
     // window.confirm / alert for destructive actions.
     const [toasts, setToasts] = useState([])            // [{ id, msg, type }]
     const [confirmDialog, setConfirmDialog] = useState(null)  // { title, message, confirmLabel, danger, onConfirm } | null
-    const [confirmBusy, setConfirmBusy] = useState(false)
     const [mediaLoading, setMediaLoading] = useState(true)
     const [photoPeople, setPhotoPeople] = useState([])   // people in current lightbox photo
     const [loadingPeople, setLoadingPeople] = useState(false)
@@ -392,15 +391,14 @@ export default function Gallery() {
     // Open the reusable confirm modal. `onConfirm` may be async; the modal shows a
     // busy spinner until it resolves, then closes.
     const askConfirm = useCallback((opts) => setConfirmDialog(opts), [])
-    const runConfirm = useCallback(async () => {
-        if (!confirmDialog?.onConfirm) { setConfirmDialog(null); return }
-        setConfirmBusy(true)
-        try {
-            await confirmDialog.onConfirm()
-        } finally {
-            setConfirmBusy(false)
-            setConfirmDialog(null)
-        }
+    // Close the modal immediately, then fire the action. The action owns its own
+    // progress feedback (the toolbar's "Deleting…", the button spinner, and a
+    // completion toast), so the modal never sits open for the length of a long
+    // batch delete — which looked frozen/broken.
+    const runConfirm = useCallback(() => {
+        const fn = confirmDialog?.onConfirm
+        setConfirmDialog(null)
+        if (fn) Promise.resolve().then(fn)
     }, [confirmDialog])
 
     // Reset media loading + clear people on lightbox index change
@@ -2689,19 +2687,17 @@ export default function Gallery() {
                         </div>
                         <div className="px-6 py-4 bg-ivory-100/50 border-t border-stone-150 flex items-center justify-end gap-2.5">
                             <button
-                                onClick={() => { if (!confirmBusy) setConfirmDialog(null) }}
-                                disabled={confirmBusy}
-                                className="text-xs font-semibold text-taupe-600 px-4 py-2.5 rounded-xl hover:bg-white cursor-pointer transition disabled:opacity-50"
+                                onClick={() => setConfirmDialog(null)}
+                                className="text-xs font-semibold text-taupe-600 px-4 py-2.5 rounded-xl hover:bg-white cursor-pointer transition"
                             >
                                 {confirmDialog.cancelLabel || 'Cancel'}
                             </button>
                             <button
                                 onClick={runConfirm}
-                                disabled={confirmBusy}
-                                className={`text-xs font-semibold text-white px-5 py-2.5 rounded-xl cursor-pointer transition flex items-center gap-2 disabled:opacity-70 disabled:cursor-wait ${confirmDialog.danger ? 'bg-red-650 hover:bg-red-750' : 'bg-taupe-800 hover:bg-gold-600'}`}
+                                style={confirmDialog.danger ? { backgroundColor: '#c0392b' } : { backgroundColor: '#4a4038' }}
+                                className="text-xs font-semibold text-white px-5 py-2.5 rounded-xl cursor-pointer transition hover:opacity-90"
                             >
-                                {confirmBusy && <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
-                                {confirmBusy ? 'Working…' : (confirmDialog.confirmLabel || 'Confirm')}
+                                {confirmDialog.confirmLabel || 'Confirm'}
                             </button>
                         </div>
                     </div>
