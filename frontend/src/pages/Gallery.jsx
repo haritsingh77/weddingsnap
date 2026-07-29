@@ -328,6 +328,7 @@ export default function Gallery() {
     // Face Clustering states
     const [clusters, setClusters] = useState([])
     const [loadingClusters, setLoadingClusters] = useState(false)
+    const [clustersError, setClustersError] = useState(false)
     const [selectedCluster, setSelectedCluster] = useState(null)
     const [editingClusterId, setEditingClusterId] = useState(null)
     const [newName, setNewName] = useState('')
@@ -635,22 +636,27 @@ export default function Gallery() {
         })
 
     // Fetch clusters dynamically when switching to people tab
-    useEffect(() => {
-        if (tab === 'people' && clusters.length === 0) {
-            const fetchClusters = async () => {
-                setLoadingClusters(true)
-                try {
-                    const res = await getFaceClusters()
-                    setClusters(res.data)
-                } catch (err) {
-                    console.error("Failed to fetch recognized faces:", err)
-                } finally {
-                    setLoadingClusters(false)
-                }
-            }
-            fetchClusters()
+    const loadClusters = useCallback(async () => {
+        setLoadingClusters(true)
+        setClustersError(false)
+        try {
+            const res = await getFaceClusters()
+            setClusters(res.data || [])
+        } catch (err) {
+            // The first cold request rebuilds ~27k faces (~20s) and can time out.
+            // Show a retry, NOT "no recognized faces" — the data is there.
+            console.error("Failed to fetch recognized faces:", err)
+            setClustersError(true)
+        } finally {
+            setLoadingClusters(false)
         }
-    }, [tab, clusters.length])
+    }, [])
+
+    useEffect(() => {
+        if (tab === 'people' && clusters.length === 0 && !loadingClusters) {
+            loadClusters()
+        }
+    }, [tab]) // eslint-disable-line react-hooks/exhaustive-deps
 
     // Fetch categories dynamically when switching to categories tab
     useEffect(() => {
@@ -1330,8 +1336,14 @@ export default function Gallery() {
             {/* Error Message */}
             {error && (
                 <div className="max-w-4xl mx-auto px-4 mt-6">
-                    <div className="bg-red-50/60 border border-red-100 rounded-xl p-4 text-red-500 text-sm text-center font-medium">
+                    <div className="bg-red-50/60 border border-red-100 rounded-xl p-4 text-red-500 text-sm text-center font-medium flex flex-col items-center gap-3">
                         {error}
+                        <button
+                            onClick={() => { setError(''); fetchingPageRef.current = 0; fetchPhotos(1) }}
+                            className="bg-taupe-800 text-white text-xs font-semibold px-4 py-2 rounded-lg hover:bg-gold-600 transition cursor-pointer"
+                        >
+                            Try again
+                        </button>
                     </div>
                 </div>
             )}
@@ -1342,14 +1354,34 @@ export default function Gallery() {
                 {/* 1. PEOPLE / FACES TAB GRID */}
                 {tab === 'people' && !selectedCluster && (
                     loadingClusters ? (
-                        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-6 md:gap-8">
-                            {[...Array(5)].map((_, i) => (
-                                <div key={i} className="flex flex-col items-center gap-3 animate-pulse">
-                                    <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full bg-gold-100/60" />
-                                    <div className="h-3 w-16 bg-gold-100/60 rounded" />
-                                    <div className="h-2.5 w-12 bg-stone-150/60 rounded" />
-                                </div>
-                            ))}
+                        <div className="flex flex-col items-center gap-6">
+                            <div className="flex items-center gap-2.5 text-taupe-400 text-xs font-medium">
+                                <span className="w-3.5 h-3.5 border-2 border-gold-300 border-t-transparent rounded-full animate-spin" />
+                                Gathering everyone's faces…
+                            </div>
+                            <div className="w-full grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-6 md:gap-8">
+                                {[...Array(10)].map((_, i) => (
+                                    <div key={i} className="flex flex-col items-center gap-3 animate-pulse">
+                                        <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full bg-gold-100/60" />
+                                        <div className="h-3 w-16 bg-gold-100/60 rounded" />
+                                        <div className="h-2.5 w-12 bg-stone-150/60 rounded" />
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    ) : clustersError ? (
+                        <div className="text-center py-20 flex flex-col items-center gap-4 animate-fade-in-up">
+                            <div className="text-4xl">🌐</div>
+                            <h3 className="font-serif text-taupe-800 text-lg">Taking a moment to load</h3>
+                            <p className="text-taupe-400 font-light text-sm max-w-xs leading-relaxed">
+                                The face folders are waking up (this can take a few seconds the first time). Give it another try.
+                            </p>
+                            <button
+                                onClick={loadClusters}
+                                className="mt-1 bg-taupe-800 text-white text-xs font-semibold px-5 py-2.5 rounded-xl hover:bg-gold-600 transition cursor-pointer"
+                            >
+                                Try again
+                            </button>
                         </div>
                     ) : clusters.length === 0 ? (
                         <div className="text-center py-20 flex flex-col items-center gap-4 animate-fade-in-up">

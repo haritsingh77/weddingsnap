@@ -30,9 +30,15 @@ app.add_middleware(
 async def add_no_cache_headers(request, call_next):
     response = await call_next(request)
     if request.url.path.startswith(("/faces", "/photos", "/download", "/admin")):
-        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-        response.headers["Pragma"] = "no-cache"
-        response.headers["Expires"] = "0"
+        # Only force no-cache on the DYNAMIC data endpoints (JSON that changes).
+        # Immutable media — a drive_id's preview/thumbnail/stream bytes never
+        # change — deliberately sets its own "max-age" so the browser can cache
+        # it for a day; that is what makes revisiting a photo instant instead of
+        # re-fetching from Drive. Don't clobber that.
+        if "max-age" not in response.headers.get("Cache-Control", ""):
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
     return response
 
 # Register routes
