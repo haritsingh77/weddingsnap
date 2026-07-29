@@ -146,13 +146,13 @@ def thumb_photo(file_id: str, size: int = 400):
     import os
 
     if os.getenv("THUMB_VERIFY_CDN", "").strip() not in ("1", "true", "yes"):
-        return RedirectResponse(url=cdn_url, status_code=307)
+        return RedirectResponse(url=cdn_url, status_code=307, headers={"Cache-Control": "private, max-age=86400"})
 
     try:
         import httpx
         head = httpx.head(cdn_url, timeout=2.0)
         if head.status_code == 200:
-            return RedirectResponse(url=cdn_url, status_code=307)
+            return RedirectResponse(url=cdn_url, status_code=307, headers={"Cache-Control": "private, max-age=86400"})
     except Exception:
         pass  # Supabase check failed — fall through to Drive
 
@@ -414,7 +414,7 @@ def preview_photo(file_id: str):
     try:
         import httpx
         if httpx.head(cdn_url, timeout=3.0).status_code == 200:
-            return RedirectResponse(url=cdn_url, status_code=307)
+            return RedirectResponse(url=cdn_url, status_code=307, headers={"Cache-Control": "private, max-age=86400"})
     except Exception:
         pass
 
