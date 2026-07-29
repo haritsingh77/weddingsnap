@@ -702,6 +702,51 @@ def get_all_photos(page: int = 1, limit: int = 50):
     }
 
 
+@router.get("/highlights")
+def get_highlights(page: int = 1, limit: int = 50, media: str = "all"):
+    """Every 'common' photo — venue, décor, big group shots, plus anything an
+    admin added to everyone's album — for ALL guests to browse (the Highlights
+    tab). is_common lives on the photos row and is read live, so this always
+    reflects the latest curation. Newest first, paginated on the server.
+    """
+    offset = (page - 1) * limit
+    count_q = supabase.table("photos").select("id", count="exact").eq("is_common", True)
+    total = _apply_media(count_q, "filename", media).execute().count or 0
+
+    rows_q = (
+        supabase.table("photos")
+        .select("drive_path, is_common, face_count, created_at, filename")
+        .eq("is_common", True)
+        .order("created_at", desc=True)
+        .order("drive_path", desc=True)   # stable tiebreaker (shared timestamps)
+        .range(offset, offset + limit - 1)
+    )
+    rows = _apply_media(rows_q, "filename", media).execute().data or []
+
+    mime_map = get_drive_id_to_mime_map()
+    photos = []
+    for r in rows:
+        did = r.get("drive_path")
+        if not did:
+            continue
+        mime = mime_map.get(did, "image/jpeg")
+        photos.append({
+            "drive_id":   did,
+            "is_common":  True,
+            "thumb_url":  f"/photos/thumb/{did}",
+            "stream_url": f"/photos/stream/{did}",
+            "is_video":   mime.startswith("video/"),
+            "mime_type":  mime,
+        })
+    return {
+        "photos":   photos,
+        "page":     page,
+        "limit":    limit,
+        "total":    total,
+        "has_more": offset + limit < total,
+    }
+
+
 @router.get("/{drive_id}/people")
 def get_people_in_photo(drive_id: str):
     """
@@ -1247,6 +1292,41 @@ def remove_from_group(drive_id: str):
     supabase.table("photos").update({"is_common": False}).eq("drive_path", drive_id).execute()
     log.info("Admin removed %s from Group Moments", drive_id)
     return {"success": True, "drive_id": drive_id, "is_common": False}
+
+
+class MarkCommonBatchBody(BaseModel):
+    drive_ids: list[str]
+
+
+@router.post("/{drive_id}/mark-common", dependencies=[Depends(require_admin)])
+def mark_as_common(drive_id: str):
+    """Add one photo to everyone's album (admin) — the inverse of remove-from-group.
+
+    Sets photos.is_common, so the shot appears in the Highlights tab for every
+    guest and is bundled into every guest's download. This is how the couple's
+    portraits / venue shots (which the 4+-faces heuristic never flags) get into
+    everyone's complete album. is_common is read live from the DB, so there is no
+    cache to bust.
+    """
+    res = supabase.table("photos").select("id").eq("drive_path", drive_id).limit(1).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Photo not found.")
+    supabase.table("photos").update({"is_common": True}).eq("drive_path", drive_id).execute()
+    log.info("Admin added %s to everyone's album (is_common)", drive_id)
+    return {"success": True, "drive_id": drive_id, "is_common": True}
+
+
+@router.post("/mark-common-batch", dependencies=[Depends(require_admin)])
+def mark_as_common_batch(body: MarkCommonBatchBody):
+    """Add several photos to everyone's album at once (admin, from select mode)."""
+    ids = [d for d in (body.drive_ids or []) if d]
+    if ids:
+        # Chunk the .in_() so a large selection never blows the URL length limit.
+        from app.services.db_paging import chunked
+        for batch in chunked(ids, 200):
+            supabase.table("photos").update({"is_common": True}).in_("drive_path", batch).execute()
+    log.info("Admin added %d photo(s) to everyone's album", len(ids))
+    return {"success": True, "count": len(ids)}
 
 
 @router.post("/{drive_id}/remove-from-album", dependencies=[Depends(require_admin)])

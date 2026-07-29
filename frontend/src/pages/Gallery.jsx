@@ -12,6 +12,9 @@ import {
   removeHouseholdMember,
   getPhotos,
   getAllPhotos,
+  getHighlights,
+  markAsCommon,
+  markAsCommonBatch,
   getPhotoPeople,
   removePersonFromPhoto,
   addPersonToPhoto,
@@ -429,10 +432,12 @@ export default function Gallery() {
             // A guest's "All Moments" is their own album — their matched photos
             // plus everything flagged common — which is what /photos/{id}
             // already returns.
-            const mediaTabs = tab === 'mine' || tab === 'common'
+            const mediaTabs = tab === 'mine' || tab === 'common' || tab === 'highlights'
             const res = (tab === 'all' && isAdmin)
                 ? await getAllPhotos(p)
-                : await getPhotos(guestId, p, mediaTabs ? tab : 'all', mediaTabs ? mediaFilter : 'all')
+                : tab === 'highlights'
+                    ? await getHighlights(p, mediaFilter)
+                    : await getPhotos(guestId, p, mediaTabs ? tab : 'all', mediaTabs ? mediaFilter : 'all')
             const { photos: newPhotos, has_more, total: totalPhotos, family_members: fetchedFamilyMembers } = res.data
             if (fetchedFamilyMembers) {
                 setFamilyMembers(fetchedFamilyMembers)
@@ -450,9 +455,9 @@ export default function Gallery() {
             })
             setHasMore(has_more)
             setTotal(totalPhotos)
-            // Personal tabs report the guest's real matched total — capture it
-            // for the header regardless of which tab the user is browsing.
-            if (tab !== 'all') setMyMatchCount(totalPhotos)
+            // Only the guest's own feeds report their real matched total — capture
+            // it for the header. Highlights is everyone's shared set, not "yours".
+            if (tab === 'mine' || tab === 'common') setMyMatchCount(totalPhotos)
             setPage(p)
         } catch (err) {
             console.error('Failed to fetch photos:', err)
@@ -499,9 +504,10 @@ export default function Gallery() {
         // work — and on People it fired the heavy filter=all merge (~25s for a
         // big album) which competed with the clusters call, showing "Could not
         // load gallery photos" and starving the People list.
-        if (tab !== 'all' && tab !== 'mine' && tab !== 'common') return
+        if (tab !== 'all' && tab !== 'mine' && tab !== 'common' && tab !== 'highlights') return
         // Just Me / Group Moments are personal feeds keyed to a guest; a pure
         // admin has no "me", so there is nothing to fetch for those tabs.
+        // (Highlights is everyone's shared set, so it needs no guest.)
         if ((tab === 'mine' || tab === 'common') && !guestId) return
         fetchPhotos(1)
     }, [guestId, tab, mediaFilter, navigate]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -966,6 +972,35 @@ export default function Gallery() {
         })
     }
 
+    // Admin: add a photo to everyone's album (Highlights + every download).
+    // Additive and reversible, so no confirm — just flip is_common in place.
+    const handleMarkCommon = async (driveId) => {
+        try {
+            await markAsCommon(driveId)
+            setPhotos(prev => prev.map(p => p.drive_id === driveId ? { ...p, is_common: true } : p))
+            setClusterPhotos(prev => prev.map(p => p.drive_id === driveId ? { ...p, is_common: true } : p))
+            showToast("Added to everyone's album ✨")
+        } catch (err) {
+            console.error('Mark common failed:', err)
+            showToast("Could not add to everyone's album", 'error')
+        }
+    }
+
+    const handleBatchMarkCommon = async () => {
+        if (selectedPhotos.length === 0) return
+        const ids = selectedPhotos
+        try {
+            await markAsCommonBatch(ids)
+            setPhotos(prev => prev.map(p => ids.includes(p.drive_id) ? { ...p, is_common: true } : p))
+            setIsMultiSelectMode(false)
+            setSelectedPhotos([])
+            showToast(`${ids.length} added to everyone's album ✨`)
+        } catch (err) {
+            console.error('Batch mark common failed:', err)
+            showToast('Could not add the selected photos', 'error')
+        }
+    }
+
     // Admin: remove a photo from the album currently being viewed.
     const handleRemoveFromAlbum = (driveId, album) => {
         if (!album) return
@@ -1262,7 +1297,7 @@ export default function Gallery() {
 
                 {/* Aesthetic Navigation Tabs */}
                 <div className="max-w-4xl mx-auto flex gap-5 sm:gap-6 mt-4 sm:mt-6 border-t border-gold-100 pt-4 overflow-x-auto whitespace-nowrap scrollbar-none -mx-4 px-4 sm:mx-0 sm:px-0">
-                    {['all', 'mine', 'common', 'people', 'families', 'categories'].filter(t => (t !== 'people' && t !== 'all' && t !== 'families') || isAdmin).map(t => (
+                    {['all', 'mine', 'common', 'highlights', 'people', 'families', 'categories'].filter(t => (t !== 'people' && t !== 'all' && t !== 'families') || isAdmin).map(t => (
                         <button
                             key={t}
                             onClick={() => {
@@ -1278,7 +1313,7 @@ export default function Gallery() {
                                     : 'border-transparent text-taupe-300 hover:text-taupe-500'
                                 }`}
                         >
-                            {t === 'all' ? 'All Moments' : t === 'mine' ? 'Just Me' : t === 'common' ? 'Group Moments' : t === 'people' ? 'People' : t === 'families' ? 'Families' : 'Albums'}
+                            {t === 'all' ? 'All Moments' : t === 'mine' ? 'Just Me' : t === 'common' ? 'Group Moments' : t === 'highlights' ? 'Highlights' : t === 'people' ? 'People' : t === 'families' ? 'Families' : 'Albums'}
                         </button>
                     ))}
                 </div>
@@ -1699,18 +1734,20 @@ export default function Gallery() {
                 {((tab !== 'people' && tab !== 'categories' && tab !== 'families') || selectedCluster || selectedCategory) && (
                     <>
                         {/* Standard Tabs Header / Action Bar */}
-                        {!selectedCluster && !selectedCategory && (tab === 'all' || tab === 'mine' || tab === 'common') && (
+                        {!selectedCluster && !selectedCategory && (tab === 'all' || tab === 'mine' || tab === 'common' || tab === 'highlights') && (
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 mb-8 pb-6 border-b border-gold-200/50">
                                 <div>
                                     <h2 className="font-serif text-taupe-900 text-xl sm:text-2xl tracking-tight leading-none">
-                                        {tab === 'all' ? 'All Moments' : tab === 'mine' ? 'Just Me' : 'Group Moments'}
+                                        {tab === 'all' ? 'All Moments' : tab === 'mine' ? 'Just Me' : tab === 'highlights' ? 'Highlights' : 'Group Moments'}
                                     </h2>
                                     <p className="text-taupe-400 text-xs font-medium mt-1.5">
-                                        {tab === 'all' && total > 0
-                                            ? `${total.toLocaleString()} moments in the full gallery`
-                                            : `${filtered.length} ${filtered.length === 1 ? 'moment' : 'moments'} shown`}
+                                        {tab === 'highlights'
+                                            ? `${total > 0 ? total.toLocaleString() : filtered.length} shots everyone shares — the couple, the venue, the big moments`
+                                            : tab === 'all' && total > 0
+                                                ? `${total.toLocaleString()} moments in the full gallery`
+                                                : `${filtered.length} ${filtered.length === 1 ? 'moment' : 'moments'} shown`}
                                     </p>
-                                    {(tab === 'mine' || tab === 'common') && (
+                                    {(tab === 'mine' || tab === 'common' || tab === 'highlights') && (
                                         <div className="mt-3 inline-flex items-center gap-0.5 rounded-full bg-ivory-100 border border-gold-200/60 p-0.5 shadow-xs">
                                             {['photos', 'videos'].map(m => (
                                                 <button
@@ -2400,13 +2437,21 @@ export default function Gallery() {
                                             {/* "Assign" was retired — adding someone to a photo now
                                                 happens through "People in this photo · ＋ Add person"
                                                 above, which also fixes the recognition and is reversible. */}
-                                            {activePhoto.is_common && (
+                                            {activePhoto.is_common ? (
                                                 <button
                                                     onClick={() => handleRemoveFromGroup(activePhoto.drive_id)}
-                                                    title="Takes it out of Group Moments — the photo is kept"
+                                                    title="Takes it out of Highlights / everyone's album — the photo is kept"
                                                     className="bg-taupe-800/90 hover:bg-stone-750 text-white px-4 py-2.5 rounded-xl text-xs font-semibold transition-all duration-300 flex items-center gap-1.5 cursor-pointer shadow-lg border border-white/10"
                                                 >
                                                     👥 Not a group photo
+                                                </button>
+                                            ) : (
+                                                <button
+                                                    onClick={() => handleMarkCommon(activePhoto.drive_id)}
+                                                    title="Adds it to Highlights and every guest's download"
+                                                    className="bg-gold-600/90 hover:bg-gold-600 text-white px-4 py-2.5 rounded-xl text-xs font-semibold transition-all duration-300 flex items-center gap-1.5 cursor-pointer shadow-lg border border-white/10"
+                                                >
+                                                    ✨ Add to everyone's album
                                                 </button>
                                             )}
                                             {selectedCategory && (
@@ -2646,6 +2691,15 @@ export default function Gallery() {
                                     >
                                         ⬇️ Download
                                     </button>
+                                    {isAdmin && (
+                                        <button
+                                            onClick={handleBatchMarkCommon}
+                                            title="Add the selected photos to Highlights and every guest's download"
+                                            className="bg-gold-600 hover:bg-gold-700 text-white text-xs font-bold px-3 py-2 rounded-xl transition-all flex items-center gap-1 cursor-pointer shadow-md whitespace-nowrap"
+                                        >
+                                            ✨ Everyone's album
+                                        </button>
+                                    )}
                                     {isAdmin && (
                                         <button
                                             onClick={handleBatchDelete}

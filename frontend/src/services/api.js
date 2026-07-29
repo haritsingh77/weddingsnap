@@ -55,6 +55,19 @@ export const getPhotos = (guestId, page = 1, filter = 'all', media = 'all') =>
 export const getAllPhotos = (page = 1) =>
   api.get(`/photos/all?page=${page}&limit=50`)
 
+// Highlights: every "common" photo (venue, décor, group shots + anything an
+// admin curated in), for all guests to browse.
+export const getHighlights = (page = 1, media = 'all') =>
+  api.get(`/photos/highlights?page=${page}&limit=50&media=${media}`)
+
+// Admin: add a photo (or several) to everyone's album — sets is_common, so it
+// lands in the Highlights tab and every guest's download.
+export const markAsCommon = (driveId) =>
+  api.post(`/photos/${driveId}/mark-common`)
+
+export const markAsCommonBatch = (driveIds) =>
+  api.post('/photos/mark-common-batch', { drive_ids: driveIds })
+
 export const getPhotoPeople = (driveId) =>
   api.get(`/photos/${driveId}/people`)
 
