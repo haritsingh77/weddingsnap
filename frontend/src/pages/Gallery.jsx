@@ -474,15 +474,16 @@ export default function Gallery() {
     }, [guestId, navigate, tab, mediaFilter])
 
     // Fetch the guest's own matched count once on mount, so the header is
-    // accurate even when they land on the "All Moments" tab.
+    // accurate even when they land on the "All Moments" tab. Admins browse the
+    // whole gallery, so their personal count is meaningless — skip the fetch.
     useEffect(() => {
-        if (!guestId) return
+        if (!guestId || isAdmin) return
         let cancelled = false
         getPhotos(guestId, 1)
             .then(res => { if (!cancelled) setMyMatchCount(res.data?.total ?? 0) })
             .catch(() => { if (!cancelled) setMyMatchCount(null) })
         return () => { cancelled = true }
-    }, [guestId])
+    }, [guestId, isAdmin])
 
     // Re-fetch when tab changes between 'all' and personal tabs
     useEffect(() => {
@@ -1265,7 +1266,7 @@ export default function Gallery() {
                         <div className="min-w-0">
                             <h1 className="font-serif text-taupe-900 text-lg sm:text-xl tracking-tight leading-tight mb-1 truncate">{eventName || 'Wedding Gallery'}</h1>
                             <p className="text-taupe-400 text-xs tracking-wide truncate">
-                                {!guestId
+                                {isAdmin
                                     ? 'Browsing all moments · admin'
                                     : myMatchCount === null
                                         ? 'Finding your moments…'
@@ -1297,7 +1298,14 @@ export default function Gallery() {
 
                 {/* Aesthetic Navigation Tabs */}
                 <div className="max-w-4xl mx-auto flex gap-5 sm:gap-6 mt-4 sm:mt-6 border-t border-gold-100 pt-4 overflow-x-auto whitespace-nowrap scrollbar-none -mx-4 px-4 sm:mx-0 sm:px-0">
-                    {['all', 'mine', 'common', 'highlights', 'people', 'families', 'categories'].filter(t => (t !== 'people' && t !== 'all' && t !== 'families') || isAdmin).map(t => (
+                    {['all', 'mine', 'common', 'highlights', 'people', 'families', 'categories'].filter(t => isAdmin
+                        // Admin manages the whole gallery: All Moments already contains every
+                        // group photo, so Just Me / Group Moments (a guest's personal feeds)
+                        // are just noise here — hide them.
+                        ? (t !== 'mine' && t !== 'common')
+                        // Guests only get their own feeds + shared views.
+                        : (t !== 'all' && t !== 'people' && t !== 'families')
+                    ).map(t => (
                         <button
                             key={t}
                             onClick={() => {

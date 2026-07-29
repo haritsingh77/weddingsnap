@@ -365,7 +365,9 @@ class SetProfilePicRequest(BaseModel):
 
 
 _PEOPLE_TAB_CACHE = "people_tab.json"
-_PEOPLE_TAB_TTL = 600  # seconds
+_PEOPLE_TAB_TTL = 3600  # seconds. Long, because rebuilding from the faces table
+# is ~20s and the People tab showed empty during it on a cold instance. Any
+# rename/merge/delete busts this cache explicitly, so staleness never lasts.
 
 
 def _bust_people_tab_cache():
