@@ -1304,12 +1304,14 @@ export default function Gallery() {
 
                 {/* Aesthetic Navigation Tabs */}
                 <div className="max-w-4xl mx-auto flex gap-5 sm:gap-6 mt-4 sm:mt-6 border-t border-gold-100 pt-4 overflow-x-auto whitespace-nowrap scrollbar-none -mx-4 px-4 sm:mx-0 sm:px-0">
-                    {['all', 'mine', 'common', 'highlights', 'people', 'families', 'categories'].filter(t => isAdmin
+                    {['all', 'mine', 'highlights', 'people', 'families', 'categories'].filter(t => isAdmin
                         // Admin manages the whole gallery: All Moments already contains every
-                        // group photo, so Just Me / Group Moments (a guest's personal feeds)
-                        // are just noise here — hide them.
-                        ? (t !== 'mine' && t !== 'common')
-                        // Guests only get their own feeds + shared views.
+                        // photo, so the guest's personal feed is just noise here — hide it.
+                        ? (t !== 'mine')
+                        // A guest gets their own album ("My Photos" = every photo they're in,
+                        // solo AND group) plus the shared Highlights + Albums. There's no
+                        // separate "Group Moments": it was only ever a filtered subset of the
+                        // personal album, so it doubled the same photos across two tabs.
                         : (t !== 'all' && t !== 'people' && t !== 'families')
                     ).map(t => (
                         <button
@@ -1327,7 +1329,7 @@ export default function Gallery() {
                                     : 'border-transparent text-taupe-300 hover:text-taupe-500'
                                 }`}
                         >
-                            {t === 'all' ? 'All Moments' : t === 'mine' ? 'Just Me' : t === 'common' ? 'Group Moments' : t === 'highlights' ? 'Highlights' : t === 'people' ? 'People' : t === 'families' ? 'Families' : 'Albums'}
+                            {t === 'all' ? 'All Moments' : t === 'mine' ? 'My Photos' : t === 'highlights' ? 'Highlights' : t === 'people' ? 'People' : t === 'families' ? 'Families' : 'Albums'}
                         </button>
                     ))}
                 </div>
@@ -1778,14 +1780,16 @@ export default function Gallery() {
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 mb-8 pb-6 border-b border-gold-200/50">
                                 <div>
                                     <h2 className="font-serif text-taupe-900 text-xl sm:text-2xl tracking-tight leading-none">
-                                        {tab === 'all' ? 'All Moments' : tab === 'mine' ? 'Just Me' : tab === 'highlights' ? 'Highlights' : 'Group Moments'}
+                                        {tab === 'all' ? 'All Moments' : tab === 'mine' ? 'My Photos' : 'Highlights'}
                                     </h2>
                                     <p className="text-taupe-400 text-xs font-medium mt-1.5">
                                         {tab === 'highlights'
                                             ? `${total > 0 ? total.toLocaleString() : filtered.length} shots everyone shares — the couple, the venue, the big moments`
-                                            : tab === 'all' && total > 0
-                                                ? `${total.toLocaleString()} moments in the full gallery`
-                                                : `${filtered.length} ${filtered.length === 1 ? 'moment' : 'moments'} shown`}
+                                            : tab === 'mine'
+                                                ? `${total > 0 ? total.toLocaleString() : filtered.length} ${total === 1 ? 'photo' : 'photos'} of you — solo and group`
+                                                : tab === 'all' && total > 0
+                                                    ? `${total.toLocaleString()} moments in the full gallery`
+                                                    : `${filtered.length} ${filtered.length === 1 ? 'moment' : 'moments'} shown`}
                                     </p>
                                     {(tab === 'mine' || tab === 'common' || tab === 'highlights') && (
                                         <div className="mt-3 inline-flex items-center gap-0.5 rounded-full bg-ivory-100 border border-gold-200/60 p-0.5 shadow-xs">
@@ -2211,10 +2215,10 @@ export default function Gallery() {
                                         <div className="text-4xl">🌾</div>
                                         <h3 className="font-serif text-taupe-800 text-lg">No moments found here</h3>
                                         <p className="text-taupe-400 font-light text-sm max-w-xs leading-relaxed">
-                                            {tab === 'mine' 
-                                                ? "We couldn't find any individual moments of you. Check Group Moments or scan again."
-                                                : tab === 'common' 
-                                                ? "No group moments here yet." 
+                                            {tab === 'mine'
+                                                ? "We haven't matched any photos to you yet. Have a look at Highlights for the shared moments."
+                                                : tab === 'highlights'
+                                                ? "No shared highlights here yet."
                                                 : "We haven't found any photos of you yet."
                                             }
                                         </p>
