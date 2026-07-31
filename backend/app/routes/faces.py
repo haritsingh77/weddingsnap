@@ -745,6 +745,12 @@ def get_cluster_photos(cluster_id: str):
 def get_face_crop_bytes(rep: dict) -> bytes:
     """Download, crop, and cache a face representative image."""
     from app.services.drive_cache import get_cached_file, save_cached_file, LOCAL_CACHE_DIR
+    # These were used at function scope but never imported here — so every face
+    # crop raised NameError (blank face-folder thumbnails). Imported now.
+    import io
+    import cv2
+    from PIL import Image, ImageOps
+    from app.services.drive_service import download_file_from_drive, download_file_to_memory
 
     path_str = rep["path"]
     location = rep["location"]  # [top, right, bottom, left]
@@ -767,93 +773,59 @@ def get_face_crop_bytes(rep: dict) -> bytes:
     if cached_data:
         return cached_data
 
-    # ── 2. Generate fresh thumbnail ───────────────────────────────────────────
+    # ── 2. Generate fresh crop ────────────────────────────────────────────────
+    # The stored bbox is in the ORIGINAL full-resolution image's coordinate space
+    # (its values routinely exceed 1200), so we crop from the full-res source
+    # directly. The previous code scaled the bbox against a 400px thumbnail and a
+    # 1200px resize, which pushed the crop box off the image and raised
+    # "right < left" — the reason every face folder was blank. The result is
+    # cached below, so the full download is a one-time cost per face.
     try:
-        # Try to load size-400 thumbnail from cache first to avoid heavy download
-        thumb_key = f"thumb_{drive_id}_400.jpg"
-        thumb_data = get_cached_file(thumb_key)
-
-        img = None
-        if thumb_data:
-            try:
-                img = Image.open(io.BytesIO(thumb_data)).convert("RGB")
-                # HOG detector ran on 1200px max image size. Scale coordinates dynamically.
-                w, h = img.size
-                scale = max(w, h) / 1200.0
-                top, right, bottom, left = [int(c * scale) for c in location]
-            except Exception as thumb_err:
-                log.warning(f"Could not crop from size-400 thumbnail: {thumb_err}")
-                img = None
-
-        if img is None:
-            # Fall back to downloading the full file from Google Drive if thumbnail is missing or crop failed
-            if is_video:
-                # Use local cache directory to ensure write permission on Windows
-                temp_video = LOCAL_CACHE_DIR / f"temp_thumb_{drive_id}.tmp"
-                temp_video.parent.mkdir(parents=True, exist_ok=True)
-
-                success = download_file_from_drive(drive_id, temp_video)
-                if not success:
-                    raise Exception("Could not download video from Google Drive")
-
-                cap = cv2.VideoCapture(str(temp_video))
-                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx or 0)
-                ret, frame = cap.read()
-                cap.release()
-
-                if temp_video.exists():
-                    try:
-                        temp_video.unlink()
-                    except Exception:
-                        pass
-
-                if not ret:
-                    raise Exception("Could not decode video frame")
-
-                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                img = Image.fromarray(rgb_frame)
-            else:
-                data = download_file_to_memory(drive_id)
-                if not data:
-                    raise Exception("Could not download image from Google Drive")
-                img = Image.open(io.BytesIO(data)).convert("RGB")
-
-            if not is_video:
-                img = ImageOps.exif_transpose(img)
-
-            w, h = img.size
-            if max(w, h) > 1200:
-                scale = 1200 / max(w, h)
-                img = img.resize(
-                    (int(w * scale), int(h * scale)), Image.Resampling.LANCZOS
-                )
-                w, h = img.size
-
-            top, right, bottom, left = location
+        if is_video:
+            temp_video = LOCAL_CACHE_DIR / f"temp_thumb_{drive_id}.tmp"
+            temp_video.parent.mkdir(parents=True, exist_ok=True)
+            if not download_file_from_drive(drive_id, temp_video):
+                raise Exception("Could not download video from Google Drive")
+            cap = cv2.VideoCapture(str(temp_video))
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx or 0)
+            ret, frame = cap.read()
+            cap.release()
+            if temp_video.exists():
+                try:
+                    temp_video.unlink()
+                except Exception:
+                    pass
+            if not ret:
+                raise Exception("Could not decode video frame")
+            img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        else:
+            data = download_file_to_memory(drive_id)
+            if not data:
+                raise Exception("Could not download image from Google Drive")
+            img = Image.open(io.BytesIO(data)).convert("RGB")
+            img = ImageOps.exif_transpose(img)
 
         w, h = img.size
-        fh = bottom - top
-        fw = right - left
-        pad_y = int(fh * 0.45)
-        pad_x = int(fw * 0.45)
+        top, right, bottom, left = location
+        # Clamp the box to the image, then reject anything degenerate.
+        top = max(0, min(int(top), h)); bottom = max(0, min(int(bottom), h))
+        left = max(0, min(int(left), w)); right = max(0, min(int(right), w))
+        if right <= left or bottom <= top:
+            raise Exception(f"Invalid face box {location} for image {w}x{h}")
 
-        cropped = img.crop(
-            (
-                max(0, left - pad_x),
-                max(0, top - pad_y),
-                min(w, right + pad_x),
-                min(h, bottom + pad_y),
-            )
-        )
-        cropped = cropped.resize((150, 150), Image.Resampling.LANCZOS)
+        pad_y = int((bottom - top) * 0.45)
+        pad_x = int((right - left) * 0.45)
+        cropped = img.crop((
+            max(0, left - pad_x),
+            max(0, top - pad_y),
+            min(w, right + pad_x),
+            min(h, bottom + pad_y),
+        )).resize((150, 150), Image.Resampling.LANCZOS)
 
         buf = io.BytesIO()
         cropped.save(buf, format="JPEG", quality=90)
         result_bytes = buf.getvalue()
-
-        # ── 3. Save to Drive cache (persistent) + L1 ─────────────────────────
         save_cached_file(cache_key, result_bytes, mime_type="image/jpeg")
-
         return result_bytes
 
     except Exception as e:
@@ -886,9 +858,25 @@ def get_guest_selfie_public(guest_id: str):
             log.error(f"Failed to generate custom profile pic for guest {guest_id}: {e}")
 
     selfie_data = get_cached_file(f"selfie_{guest_id}.jpg")
-    if not selfie_data:
-        raise HTTPException(status_code=404, detail="Selfie not found")
-    return Response(content=selfie_data, media_type="image/jpeg")
+    if selfie_data:
+        return Response(content=selfie_data, media_type="image/jpeg")
+
+    # Most guests are registered by name only (no uploaded selfie), so fall back
+    # to a face crop from the guest's linked face cluster — otherwise every named
+    # person's People-folder avatar is a blank circle.
+    try:
+        rows = (
+            supabase.table("guest_clusters")
+            .select("cluster_id").eq("guest_id", guest_id).limit(1).execute()
+        ).data
+        if rows:
+            c = get_face_clusters().get(str(rows[0]["cluster_id"]))
+            if c and c.get("representative"):
+                return Response(content=get_face_crop_bytes(c["representative"]), media_type="image/jpeg")
+    except Exception as e:
+        log.error(f"Guest {guest_id} selfie face-crop fallback failed: {e}")
+
+    raise HTTPException(status_code=404, detail="Selfie not found")
 
 
 @router.get("/members/{member_id}/selfie")
