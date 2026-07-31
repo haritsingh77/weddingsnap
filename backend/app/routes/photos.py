@@ -616,51 +616,9 @@ async def upload_category_photo(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-class SharePhotoRequest(BaseModel):
-    drive_id: str
-    guest_id: str
-
-
-@router.post("/share", dependencies=[Depends(require_admin)])
-def share_photo_with_guest(body: SharePhotoRequest):
-    """Manually share/associate a photo (by drive_id) with a guest's album."""
-    guest_id = body.guest_id.replace("guest_", "")
-    drive_id = body.drive_id
-    
-    try:
-        # 1. Verify guest exists
-        guest_res = supabase.table("guests").select("id").eq("id", guest_id).execute()
-        if not guest_res.data:
-            raise HTTPException(status_code=404, detail="Guest not found")
-            
-        # 2. Get or create photo in database
-        photo_res = supabase.table("photos").select("id").eq("drive_path", drive_id).execute()
-        if not photo_res.data:
-            # Register dynamically
-            mime_map = get_drive_id_to_mime_map()
-            mime_type = mime_map.get(drive_id, "image/jpeg")
-            
-            insert_res = supabase.table("photos").insert({
-                "drive_path": drive_id,
-                "is_common": False,
-                "face_count": 1
-            }).execute()
-            if not insert_res.data:
-                raise HTTPException(status_code=500, detail="Failed to register photo in database")
-            photo_id = insert_res.data[0]["id"]
-        else:
-            photo_id = photo_res.data[0]["id"]
-            
-        # 3. Associate photo with guest in guest_photos table
-        supabase.table("guest_photos").upsert({
-            "guest_id": guest_id,
-            "photo_id": photo_id
-        }, on_conflict="guest_id,photo_id").execute()
-        
-        return {"success": True, "message": "Photo shared successfully"}
-    except Exception as e:
-        log.error(f"Error sharing photo: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+# NOTE: the old POST /photos/share endpoint was removed — assigning a photo to a
+# guest now goes through POST /photos/{drive_id}/people/add (the "Add person"
+# flow), which does the same guest_photos upsert plus the people-list override.
 
 
 @router.get("/all", dependencies=[Depends(require_admin)])
@@ -1625,9 +1583,8 @@ async def delete_photos_batch(body: DeleteBatchRequest):
     errors = []
     
     from app.services.drive_service import execute_with_retry, get_or_create_temp_delete_folder
-    from app.services.drive_cache import get_cached_file, save_cached_file, delete_cached_file
-    from app.services.face_service import get_filename_map
-    
+    from app.services.drive_cache import delete_cached_file
+
     try:
         temp_delete_id = get_or_create_temp_delete_folder()
     except Exception as e:
@@ -1642,8 +1599,8 @@ async def delete_photos_batch(body: DeleteBatchRequest):
     # and delete its DB rows.
     pruned = []  # (drive_id, filename) tuples actually processed
 
-    # Read the map FRESH (get_filename_map is lru-cached and could be a stale
-    # per-instance snapshot we'd then re-save, reverting other edits).
+    # Read the map FRESH from the short-TTL cache, so we never re-save a stale
+    # per-instance snapshot and revert another instance's edits.
     from app.services.drive_cache import get_cached_json
     mapping = get_cached_json("drive_filename_map.json") or {}
 

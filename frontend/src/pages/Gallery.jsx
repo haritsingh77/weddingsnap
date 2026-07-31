@@ -22,7 +22,6 @@ import {
   getClusterPhotos,
   renameCluster,
   deletePhoto,
-  sharePhoto,
   getGuestsList,
   getCategories,
   createCategory,
@@ -363,14 +362,8 @@ export default function Gallery() {
     const [newCategoryName, setNewCategoryName] = useState('')
     const [uploadingFiles, setUploadingFiles] = useState([])
 
-    // Sharing states
+    // Guest list — powers the "Add person" picker (search any registered guest).
     const [guestsList, setGuestsList] = useState([])
-    const [showShareDropdown, setShowShareDropdown] = useState(false)
-    const [shareSearchQuery, setShareSearchQuery] = useState('')
-    // Multi-assign: a group photo can hold several people the detector missed,
-    // so the modal collects a set of guests and assigns them all in one action.
-    const [selectedShareGuests, setSelectedShareGuests] = useState([])
-    const [sharing, setSharing] = useState(false)
 
     // Face Merging states
     const [selectedClusterIds, setSelectedClusterIds] = useState([])
@@ -433,7 +426,7 @@ export default function Gallery() {
             // A guest's "All Moments" is their own album — their matched photos
             // plus everything flagged common — which is what /photos/{id}
             // already returns.
-            const mediaTabs = tab === 'mine' || tab === 'common' || tab === 'highlights'
+            const mediaTabs = tab === 'mine' || tab === 'highlights'
             const res = (tab === 'all' && isAdmin)
                 ? await getAllPhotos(p)
                 : tab === 'highlights'
@@ -458,7 +451,7 @@ export default function Gallery() {
             setTotal(totalPhotos)
             // Only the guest's own feeds report their real matched total — capture
             // it for the header. Highlights is everyone's shared set, not "yours".
-            if (tab === 'mine' || tab === 'common') setMyMatchCount(totalPhotos)
+            if (tab === 'mine') setMyMatchCount(totalPhotos)
             setPage(p)
         } catch (err) {
             console.error('Failed to fetch photos:', err)
@@ -506,11 +499,11 @@ export default function Gallery() {
         // work — and on People it fired the heavy filter=all merge (~25s for a
         // big album) which competed with the clusters call, showing "Could not
         // load gallery photos" and starving the People list.
-        if (tab !== 'all' && tab !== 'mine' && tab !== 'common' && tab !== 'highlights') return
+        if (tab !== 'all' && tab !== 'mine' && tab !== 'highlights') return
         // Just Me / Group Moments are personal feeds keyed to a guest; a pure
         // admin has no "me", so there is nothing to fetch for those tabs.
         // (Highlights is everyone's shared set, so it needs no guest.)
-        if ((tab === 'mine' || tab === 'common') && !guestId) return
+        if (tab === 'mine' && !guestId) return
         fetchPhotos(1)
     }, [guestId, tab, mediaFilter, navigate]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -865,33 +858,6 @@ export default function Gallery() {
         }
     }
 
-    const toggleShareGuest = (guestId) => {
-        setSelectedShareGuests(prev =>
-            prev.includes(guestId) ? prev.filter(g => g !== guestId) : [...prev, guestId]
-        )
-    }
-
-    const handleAssignPhoto = async (photoObj) => {
-        if (selectedShareGuests.length === 0) return
-        setSharing(true)
-        try {
-            // One call per guest against the existing share endpoint. A group
-            // photo assigned to several people lands in each of their "Just Me".
-            await Promise.all(selectedShareGuests.map(gid => sharePhoto(photoObj.drive_id, gid)))
-            const names = guestsList
-                .filter(g => selectedShareGuests.includes(g.id))
-                .map(g => g.name)
-            alert(`Added to ${names.length === 1 ? names[0] : names.length + " people"}'s photos.`)
-            setShowShareDropdown(false)
-            setSelectedShareGuests([])
-            setShareSearchQuery('')
-        } catch (err) {
-            console.error("Failed to assign photo:", err)
-            alert("Something went wrong assigning the photo. Please try again.")
-        } finally {
-            setSharing(false)
-        }
-    }
 
     const handleRenameSubmit = async (e, clusterId) => {
         e.stopPropagation()
@@ -1776,7 +1742,7 @@ export default function Gallery() {
                 {((tab !== 'people' && tab !== 'categories' && tab !== 'families') || selectedCluster || selectedCategory) && (
                     <>
                         {/* Standard Tabs Header / Action Bar */}
-                        {!selectedCluster && !selectedCategory && (tab === 'all' || tab === 'mine' || tab === 'common' || tab === 'highlights') && (
+                        {!selectedCluster && !selectedCategory && (tab === 'all' || tab === 'mine' || tab === 'highlights') && (
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 mb-8 pb-6 border-b border-gold-200/50">
                                 <div>
                                     <h2 className="font-serif text-taupe-900 text-xl sm:text-2xl tracking-tight leading-none">
@@ -1791,7 +1757,7 @@ export default function Gallery() {
                                                     ? `${total.toLocaleString()} moments in the full gallery`
                                                     : `${filtered.length} ${filtered.length === 1 ? 'moment' : 'moments'} shown`}
                                     </p>
-                                    {(tab === 'mine' || tab === 'common' || tab === 'highlights') && (
+                                    {(tab === 'mine' || tab === 'highlights') && (
                                         <div className="mt-3 inline-flex items-center gap-0.5 rounded-full bg-ivory-100 border border-gold-200/60 p-0.5 shadow-xs">
                                             {['photos', 'videos'].map(m => (
                                                 <button
@@ -2694,7 +2660,7 @@ export default function Gallery() {
             {/* FLOATING SELECTION CONTROLS AND BATCH TOOLBAR */}
             {/* Floating circular Select Mode FAB — hidden while the lightbox is open
                 so it doesn't overlap the preview's bottom-right controls. */}
-            {!isMultiSelectMode && lightboxIndex === null && (tab === 'all' || tab === 'mine' || tab === 'common' || selectedCluster || selectedCategory) && (
+            {!isMultiSelectMode && lightboxIndex === null && (tab === 'all' || tab === 'mine' || tab === 'highlights' || selectedCluster || selectedCategory) && (
                 <button
                     onClick={() => setIsMultiSelectMode(true)}
                     className="fixed bottom-6 right-6 bg-taupe-800 text-white shadow-xl hover:shadow-2xl rounded-full w-14 h-14 flex items-center justify-center cursor-pointer transition-all duration-300 hover:scale-110 active:scale-95 group hover:bg-gold-550"

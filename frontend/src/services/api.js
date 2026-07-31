@@ -84,14 +84,6 @@ export const addPersonToPhoto = (driveId, person) =>
   })
 
 
-export const prepareDownload = (guestId) =>
-  api.post(`/download/${guestId}/prepare`)
-
-export const getDownloadStatus = (sessionId) =>
-  api.get(`/download/status/${sessionId}`)
-
-export const getStreamUrl = (guestId, sessionId) =>
-  `${api.defaults.baseURL}/download/${guestId}/stream/${sessionId}`
 
 // Direct streaming download of the whole album — the browser downloads the ZIP
 // as the server generates it (no prepare/poll, no server-side /tmp build).
@@ -157,9 +149,6 @@ export const adminUpdateGuest = (guestId, name, phone, selfieFile = null, tolera
   }
   return api.patch(`/admin/guests/${guestId}`, form)
 }
-
-export const sharePhoto = (driveId, guestId) =>
-  api.post('/photos/share', { drive_id: driveId, guest_id: guestId })
 
 // Households: every family that shares a link, and the name the admin gave it.
 export const getHouseholds = () =>
