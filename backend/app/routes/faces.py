@@ -746,9 +746,10 @@ def get_face_crop_bytes(rep: dict) -> bytes:
     """Download, crop, and cache a face representative image."""
     from app.services.drive_cache import get_cached_file, save_cached_file, LOCAL_CACHE_DIR
     # These were used at function scope but never imported here — so every face
-    # crop raised NameError (blank face-folder thumbnails). Imported now.
+    # crop raised NameError (blank face-folder thumbnails). Imported now. cv2 is
+    # imported lazily inside the video branch only — it isn't installed in the
+    # slim deployed image, so importing it up here 500'd every (image) crop.
     import io
-    import cv2
     from PIL import Image, ImageOps
     from app.services.drive_service import download_file_from_drive, download_file_to_memory
 
@@ -782,6 +783,7 @@ def get_face_crop_bytes(rep: dict) -> bytes:
     # cached below, so the full download is a one-time cost per face.
     try:
         if is_video:
+            import cv2  # only videos need it; not in the slim image, so lazy
             temp_video = LOCAL_CACHE_DIR / f"temp_thumb_{drive_id}.tmp"
             temp_video.parent.mkdir(parents=True, exist_ok=True)
             if not download_file_from_drive(drive_id, temp_video):
