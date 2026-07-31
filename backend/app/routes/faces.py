@@ -6,6 +6,10 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from pathlib import Path   # used by get_cluster_photos + get_face_crop_bytes at
+                           # module scope; it was only imported inside one helper,
+                           # so those two paths NameError'd (blank face thumbnails,
+                           # empty numeric-cluster photo views).
 
 import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Response
