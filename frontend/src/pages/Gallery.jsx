@@ -29,6 +29,7 @@ import {
   uploadCategoryPhoto,
   mergeClusters,
   unmergeCluster,
+  deleteCluster,
   setClusterProfilePic,
   deletePhotosBatch,
   downloadPhotosBatch,
@@ -972,6 +973,55 @@ export default function Gallery() {
             console.error('Batch mark common failed:', err)
             showToast('Could not add the selected photos', 'error')
         }
+    }
+
+    // Admin, in a person's folder: mark the selected photos as "not this person",
+    // so they leave the folder. Uses the same per-photo override as the chip ✕.
+    const handleBatchRemoveFromPerson = () => {
+        if (selectedPhotos.length === 0 || !selectedCluster) return
+        const ids = selectedPhotos
+        const n = ids.length
+        askConfirm({
+            title: `Remove ${n} from this person?`,
+            message: "They'll leave this face folder (marked “not this person”). The photos stay in the gallery.",
+            confirmLabel: 'Remove',
+            onConfirm: async () => {
+                try {
+                    await Promise.all(ids.map(did => removePersonFromPhoto(did, selectedCluster)))
+                    setClusterPhotos(prev => prev.filter(p => !ids.includes(p.drive_id)))
+                    setIsMultiSelectMode(false)
+                    setSelectedPhotos([])
+                    showToast(`${n} removed from this person`)
+                } catch (err) {
+                    console.error('Batch remove-from-person failed:', err)
+                    showToast('Could not remove those photos', 'error')
+                }
+            },
+        })
+    }
+
+    // Admin: hide a whole face folder (spurious cluster) from the People tab.
+    const handleDeleteCluster = () => {
+        if (!selectedCluster) return
+        const name = clusters.find(c => c.id === selectedCluster)?.name || 'this folder'
+        askConfirm({
+            title: `Delete "${name}" folder?`,
+            message: 'Removes this face folder from the People tab. Photos and everyone’s albums are untouched, and it can be brought back later.',
+            confirmLabel: 'Delete folder',
+            danger: true,
+            onConfirm: async () => {
+                try {
+                    await deleteCluster(selectedCluster)
+                    setClusters(prev => prev.filter(c => c.id !== selectedCluster))
+                    setSelectedCluster(null)
+                    setClusterPhotos([])
+                    showToast('Face folder removed')
+                } catch (err) {
+                    console.error('Delete cluster failed:', err)
+                    showToast('Could not remove the folder', 'error')
+                }
+            },
+        })
     }
 
     // Admin: remove a photo from the album currently being viewed.
@@ -1922,45 +1972,29 @@ export default function Gallery() {
 
                                     </div>
 
-                                    {/* Action Buttons: Multi-Select Mode toggle */}
+                                    {/* Batch actions live in the floating toolbar at the bottom
+                                        (Download / Not this person / Delete), so the header only
+                                        toggles select mode and — for admins — removes the whole
+                                        folder from the People tab. */}
                                     <div className="flex items-center gap-2">
-                                        {isMultiSelectMode ? (
+                                        {!isMultiSelectMode && (
                                             <>
-                                                <button
-                                                    onClick={() => {
-                                                        setIsMultiSelectMode(false);
-                                                        setSelectedPhotos([]);
-                                                    }}
-                                                    className="bg-white border border-gold-200/60 text-taupe-600 text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-ivory-100 cursor-pointer transition-all shadow-xs"
-                                                >
-                                                    Cancel Selection
-                                                </button>
-                                                {selectedPhotos.length > 0 && (
-                                                    <>
-                                                        <button
-                                                            onClick={handleBatchDownload}
-                                                            className="bg-taupe-800 text-white text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-gold-650 cursor-pointer transition-all flex items-center gap-1.5 shadow-sm"
-                                                        >
-                                                            ⬇️ Download ({selectedPhotos.length})
-                                                        </button>
-                                                        {isAdmin && (
-                                                            <button
-                                                                onClick={handleBatchDelete}
-                                                                className="bg-red-650 hover:bg-red-750 text-white text-xs font-semibold px-4 py-2.5 rounded-xl cursor-pointer transition-all flex items-center gap-1.5 shadow-sm"
-                                                            >
-                                                                {batchDeleting ? '⏳ Deleting…' : `🗑️ Delete (${selectedPhotos.length})`}
-                                                            </button>
-                                                        )}
-                                                    </>
+                                                {isAdmin && (
+                                                    <button
+                                                        onClick={handleDeleteCluster}
+                                                        title="Remove this face folder from the People tab (reversible; photos are kept)"
+                                                        className="bg-white border border-red-200/70 text-red-500 text-xs font-semibold px-3.5 py-2.5 rounded-xl hover:bg-red-50 hover:border-red-300 cursor-pointer transition-all flex items-center gap-1.5 shadow-xs"
+                                                    >
+                                                        🗑️ Delete folder
+                                                    </button>
                                                 )}
+                                                <button
+                                                    onClick={() => setIsMultiSelectMode(true)}
+                                                    className="bg-white border border-gold-200/60 text-taupe-700 text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-ivory-100 cursor-pointer transition-all flex items-center gap-1.5 shadow-xs"
+                                                >
+                                                    ☑️ Select Photos
+                                                </button>
                                             </>
-                                        ) : (
-                                            <button
-                                                onClick={() => setIsMultiSelectMode(true)}
-                                                className="bg-white border border-gold-200/60 text-taupe-700 text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-ivory-100 cursor-pointer transition-all flex items-center gap-1.5 shadow-xs"
-                                            >
-                                                ☑️ Select Photos
-                                            </button>
                                         )}
                                     </div>
                                 </div>
@@ -2677,18 +2711,16 @@ export default function Gallery() {
                     className="fixed bottom-6 left-0 right-0 flex justify-center px-4" 
                     style={{ zIndex: 9999 }}
                 >
-                    <div className="bg-taupe-800/95 backdrop-blur-md border border-white/10 px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-5 text-white animate-fade-in-up max-w-[95vw] sm:max-w-md">
-                        <div className="flex flex-col">
-                            <span className="text-[10px] font-bold text-gold-400 tracking-wider uppercase">Select Mode</span>
-                            <span className="text-xs text-white/90 font-medium mt-0.5 whitespace-nowrap">{selectedPhotos.length} selected</span>
+                    {/* Wraps to a second line instead of clipping when there are several
+                        actions (Download / Everyone's album / Not this person / Delete). */}
+                    <div className="bg-taupe-800/95 backdrop-blur-md border border-white/10 px-4 py-3 rounded-2xl shadow-2xl flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-white animate-fade-in-up max-w-[95vw]">
+                        <div className="flex flex-col pr-1">
+                            <span className="text-[10px] font-bold text-gold-400 tracking-wider uppercase leading-none">Select Mode</span>
+                            <span className="text-xs text-white/90 font-medium mt-1 whitespace-nowrap">{selectedPhotos.length} selected</span>
                         </div>
-                        <div className="h-8 w-[1px] bg-white/10" />
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center justify-center gap-2">
                             <button
-                                onClick={() => {
-                                    setIsMultiSelectMode(false);
-                                    setSelectedPhotos([]);
-                                }}
+                                onClick={() => { setIsMultiSelectMode(false); setSelectedPhotos([]); }}
                                 className="bg-white/10 hover:bg-white/15 text-white text-xs font-semibold px-3 py-2 rounded-xl transition-all cursor-pointer whitespace-nowrap"
                             >
                                 Cancel
@@ -2701,6 +2733,15 @@ export default function Gallery() {
                                     >
                                         ⬇️ Download
                                     </button>
+                                    {isAdmin && selectedCluster && (
+                                        <button
+                                            onClick={handleBatchRemoveFromPerson}
+                                            title="Mark the selected photos as not this person — they leave this folder"
+                                            className="bg-taupe-700 hover:bg-taupe-600 text-white text-xs font-bold px-3 py-2 rounded-xl transition-all flex items-center gap-1 cursor-pointer shadow-md whitespace-nowrap"
+                                        >
+                                            🙅 Not this person
+                                        </button>
+                                    )}
                                     {isAdmin && (
                                         <button
                                             onClick={handleBatchMarkCommon}

@@ -510,6 +510,12 @@ def get_clusters():
     ui_clusters = ui_clusters[:100]
     result = guests_list + ui_clusters
 
+    # Drop any folder an admin has hidden (DELETE /clusters/{id}). Non-destructive
+    # — the faces/photos are untouched, so a hide can be undone by clearing the id.
+    hidden = set(get_cached_json("hidden_clusters.json") or [])
+    if hidden:
+        result = [c for c in result if str(c.get("id")) not in hidden]
+
     try:
         save_cached_json(_PEOPLE_TAB_CACHE, {"built_at": time.time(), "clusters": result})
     except Exception as e:
@@ -648,6 +654,22 @@ def unmerge_cluster(cluster_id: str):
     return {"success": True, "cluster_id": cluster_id}
 
 
+@router.delete("/clusters/{cluster_id}", dependencies=[Depends(require_admin)])
+def delete_cluster(cluster_id: str):
+    """Admin: remove a whole face folder from the People tab (e.g. a spurious
+    'person' from a mis-detected face). This HIDES the cluster — the underlying
+    faces and photos are untouched, so it is fully reversible by clearing the id
+    from hidden_clusters.json. Nothing leaves the gallery or anyone's album."""
+    from app.services.drive_cache import get_cached_json, save_cached_json
+    hidden = get_cached_json("hidden_clusters.json") or []
+    if str(cluster_id) not in [str(h) for h in hidden]:
+        hidden.append(str(cluster_id))
+        save_cached_json("hidden_clusters.json", hidden)
+    log.info("Admin hid face cluster %s from the People tab", cluster_id)
+    _bust_people_tab_cache()
+    return {"success": True, "cluster_id": cluster_id, "hidden": True}
+
+
 @router.get("/clusters/{cluster_id}/photos", dependencies=[Depends(require_admin)])
 def get_cluster_photos(cluster_id: str):
     """Get all photos/videos featuring the person in the specified cluster or guest album."""
@@ -719,11 +741,19 @@ def get_cluster_photos(cluster_id: str):
     paths = clusters[cluster_id]["photos"]
     resolved = []
     from app.services.face_service import resolve_one_drive_id
+    from app.services.drive_cache import get_cached_json
+
+    # Photos an admin marked "not this person" (via the chip ✕ or the batch
+    # "Remove from this person") are recorded per-photo in photo_people.json;
+    # honour that here so they leave this folder.
+    overrides = get_cached_json("photo_people.json") or {}
 
     for path in paths:
         filename = Path(path).name
         drive_id = resolve_one_drive_id(path)
         if drive_id:
+            if str(cluster_id) in set((overrides.get(drive_id) or {}).get("removed") or []):
+                continue
             is_video = filename.lower().endswith(
                 (".mp4", ".mov", ".avi", ".mkv", ".webm")
             )

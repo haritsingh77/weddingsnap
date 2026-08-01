@@ -202,6 +202,11 @@ export const mergeClusters = (targetId, sourceIds) =>
 export const unmergeCluster = (clusterId) =>
   api.delete(`/faces/clusters/${clusterId}/unmerge`)
 
+// Admin: hide a whole face folder from the People tab (reversible — photos and
+// face data are untouched).
+export const deleteCluster = (clusterId) =>
+  api.delete(`/faces/clusters/${clusterId}`)
+
 export const setClusterProfilePic = (clusterId, driveId) =>
   api.post(`/faces/clusters/${clusterId}/set-profile-pic`, { drive_id: driveId })
 
