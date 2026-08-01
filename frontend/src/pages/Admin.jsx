@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
+  withToken,
   adminLogin,
   adminGetGuests,
   adminCreateGuest,
@@ -10,13 +11,14 @@ import {
   adminRunMatchingAll,
   adminDeleteGuest,
   adminUpdateGuest,
-  adminGetFamilyMembers,
-  adminAddFamilyMember,
-  adminDeleteFamilyMember
 } from '../services/api'
 
 const API_BASE = import.meta.env.VITE_API_URL || 
   (typeof window !== 'undefined' && window.location ? `http://${window.location.hostname}:8000` : 'http://localhost:8000')
+
+// Media endpoints require a credential; an <img>/<video> can't send headers, so
+// the admin password rides along as a query param (same pattern as the selfies).
+const authSrc = (path) => `${API_BASE}${path}?password=${encodeURIComponent(localStorage.getItem('admin_password') || '')}`
 
 export default function Admin() {
   const navigate = useNavigate()
@@ -57,15 +59,9 @@ export default function Admin() {
   const [updatingGuest, setUpdatingGuest] = useState(false)
   const [editMessage, setEditMessage] = useState('')
 
-  // Manage Family Modal state
-  const [selectedFamilyGuest, setSelectedFamilyGuest] = useState(null)
-  const [familyMembers, setFamilyMembers] = useState([])
-  const [loadingFamily, setLoadingFamily] = useState(false)
-  const [newMemberName, setNewMemberName] = useState('')
-  const [memberSelfieFile, setMemberSelfieFile] = useState(null)
-  const [memberSelfiePreview, setMemberSelfiePreview] = useState(null)
-  const [addingMember, setAddingMember] = useState(false)
-  const [familyMessage, setFamilyMessage] = useState('')
+  // (The old "Manage Family" modal was removed — it wrote to a family_members
+  // table that doesn't exist, so it always errored. Family/household management
+  // lives in the gallery's Families tab, backed by guest_clusters.)
 
   // Auto-authenticate if password already stored
   useEffect(() => {
@@ -245,66 +241,6 @@ export default function Admin() {
       setEditMessage('Failed to update guest. Ensure the server is online.')
     } finally {
       setUpdatingGuest(false)
-    }
-  }
-
-  const handleOpenFamily = async (guest) => {
-    setSelectedFamilyGuest(guest)
-    setFamilyMembers([])
-    setNewMemberName('')
-    setMemberSelfieFile(null)
-    setMemberSelfiePreview(null)
-    setFamilyMessage('')
-    setLoadingFamily(true)
-    try {
-      const res = await adminGetFamilyMembers(guest.id)
-      setFamilyMembers(res.data || [])
-    } catch (err) {
-      console.error("Failed to load family members:", err)
-    } finally {
-      setLoadingFamily(false)
-    }
-  }
-
-  const handleAddFamilyMemberSubmit = async (e) => {
-    e.preventDefault()
-    if (!newMemberName.trim() || !selectedFamilyGuest) return
-    setAddingMember(true)
-    setFamilyMessage('')
-    try {
-      const res = await adminAddFamilyMember(selectedFamilyGuest.id, newMemberName.trim(), memberSelfieFile)
-      setFamilyMessage(`Member "${res.data.name}" added successfully!`)
-      setNewMemberName('')
-      setMemberSelfieFile(null)
-      setMemberSelfiePreview(null)
-      
-      // Refresh family members list
-      const listRes = await adminGetFamilyMembers(selectedFamilyGuest.id)
-      setFamilyMembers(listRes.data || [])
-      
-      // Refresh main guest list counts
-      fetchGuestsList()
-    } catch (err) {
-      console.error("Failed to add family member:", err)
-      setFamilyMessage('Failed to add member. Please try again.')
-    } finally {
-      setAddingMember(false)
-    }
-  }
-
-  const handleDeleteFamilyMember = async (memberId, name) => {
-    if (!window.confirm(`Are you sure you want to remove family member "${name}"? This deletes their portrait and photo mappings.`)) {
-      return
-    }
-    try {
-      await adminDeleteFamilyMember(memberId)
-      setFamilyMembers(prev => prev.filter(m => m.id !== memberId))
-      
-      // Refresh main guest list counts
-      fetchGuestsList()
-    } catch (err) {
-      console.error("Failed to delete family member:", err)
-      alert("Failed to delete family member.")
     }
   }
 
@@ -538,53 +474,38 @@ export default function Admin() {
                             {guest.photo_count}
                           </span>
                         </td>
-                        <td className="px-6 py-4 text-right space-x-2">
-                          <button
-                            onClick={() => handleOpenFamily(guest)}
-                            className="text-taupe-700 hover:text-taupe-900 text-xs font-semibold bg-ivory-200 hover:bg-gold-100 px-3 py-1.5 rounded-lg cursor-pointer"
-                            title="Manage Family Members"
-                          >
-                            👨‍👩‍👧‍👦 Family
-                          </button>
-                          <button
-                            onClick={() => handleOpenReview(guest)}
-                            className="text-taupe-700 hover:text-taupe-900 text-xs font-semibold bg-ivory-200 hover:bg-gold-100 px-3 py-1.5 rounded-lg cursor-pointer"
-                            title="Review & Remove wrong matches"
-                          >
-                            👁 Review
-                          </button>
-                          <button
-                            onClick={() => handleOpenEdit(guest)}
-                            className="text-taupe-700 hover:text-taupe-900 text-xs font-semibold bg-ivory-200 hover:bg-gold-100 px-3 py-1.5 rounded-lg cursor-pointer"
-                            title="Edit guest profile and face photo"
-                          >
-                            ✏️ Edit
-                          </button>
-                          <button
-                            onClick={() => handleRunMatching(guest.id)}
-                            className="text-taupe-400 hover:text-taupe-700 text-xs p-1"
-                            title="Re-run Face Match"
-                          >
-                            🔁
-                          </button>
-                          {guest.phone && (
-                            <a
-                              href={getWhatsAppInviteLink(guest)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-green-500 hover:text-green-600 font-semibold text-xs bg-green-50 hover:bg-green-100 px-3 py-1.5 rounded-lg inline-block"
-                              title="Send invitation code via WhatsApp"
-                            >
-                              💬 Invite
-                            </a>
-                          )}
-                          <button
-                            onClick={() => handleDeleteGuest(guest.id, guest.name)}
-                            className="text-red-400 hover:text-red-600 text-xs p-1"
-                            title="Delete Guest profile"
-                          >
-                            🗑
-                          </button>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={() => handleOpenReview(guest)}
+                              className="w-8 h-8 flex items-center justify-center rounded-lg text-sm hover:bg-ivory-200 text-taupe-600 hover:text-taupe-900 cursor-pointer transition"
+                              title="Review & remove wrong matches"
+                            >👁</button>
+                            <button
+                              onClick={() => handleOpenEdit(guest)}
+                              className="w-8 h-8 flex items-center justify-center rounded-lg text-sm hover:bg-ivory-200 text-taupe-600 hover:text-taupe-900 cursor-pointer transition"
+                              title="Edit name / face photo"
+                            >✏️</button>
+                            <button
+                              onClick={() => handleRunMatching(guest.id)}
+                              className="w-8 h-8 flex items-center justify-center rounded-lg text-sm hover:bg-ivory-200 text-taupe-500 hover:text-taupe-800 cursor-pointer transition"
+                              title="Re-run face match"
+                            >🔁</button>
+                            {guest.phone && (
+                              <a
+                                href={getWhatsAppInviteLink(guest)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="w-8 h-8 flex items-center justify-center rounded-lg text-sm hover:bg-green-50 text-green-500 hover:text-green-600 transition"
+                                title="Send invite via WhatsApp"
+                              >💬</a>
+                            )}
+                            <button
+                              onClick={() => handleDeleteGuest(guest.id, guest.name)}
+                              className="w-8 h-8 flex items-center justify-center rounded-lg text-sm hover:bg-red-50 text-red-300 hover:text-red-600 cursor-pointer transition"
+                              title="Delete guest"
+                            >🗑</button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -629,16 +550,17 @@ export default function Admin() {
                     >
                       {photo.is_video ? (
                         <video
-                          src={`${API_BASE}${photo.stream_url}`}
+                          src={authSrc(photo.stream_url)}
                           className="w-full h-full object-cover"
                           preload="metadata"
                         />
                       ) : (
                         <img
-                          src={`${API_BASE}${photo.thumb_url}`}
+                          src={authSrc(photo.thumb_url)}
                           alt="Match"
                           className="w-full h-full object-cover transition duration-300 group-hover:scale-105"
                           loading="lazy"
+                          onError={(e) => { e.currentTarget.style.opacity = '0.15'; e.currentTarget.alt = '⚠︎' }}
                         />
                       )}
                       
@@ -688,14 +610,14 @@ export default function Admin() {
           >
             {reviewPhotos[lightboxIndex].is_video ? (
               <video
-                src={`${API_BASE}${reviewPhotos[lightboxIndex].stream_url}`}
+                src={authSrc(reviewPhotos[lightboxIndex].stream_url)}
                 className="max-w-full max-h-[85vh] rounded"
                 controls
                 autoPlay
               />
             ) : (
               <img
-                src={`${API_BASE}${reviewPhotos[lightboxIndex].stream_url}`}
+                src={authSrc(reviewPhotos[lightboxIndex].stream_url)}
                 alt="Enlarged"
                 className="max-w-full max-h-[85vh] object-contain rounded"
               />
@@ -809,128 +731,6 @@ export default function Admin() {
         </div>
       )}
 
-      {/* Manage Family Modal Overlay */}
-      {selectedFamilyGuest && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl border border-gold-200/60 animate-fade-in-up">
-            <div className="px-6 py-4 border-b border-gold-100 flex items-center justify-between">
-              <div>
-                <h3 className="font-serif text-lg text-taupe-900 leading-none mb-1">Manage Household</h3>
-                <p className="text-taupe-400 text-xs">Family card: <span className="font-semibold text-stone-750">{selectedFamilyGuest.name}</span></p>
-              </div>
-              <button
-                onClick={() => setSelectedFamilyGuest(null)}
-                className="text-taupe-400 hover:text-taupe-700 font-bold text-xl cursor-pointer"
-              >
-                &times;
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-6 space-y-6">
-              {/* Existing Family Members List */}
-              <div>
-                <h4 className="text-xs font-bold text-taupe-500 uppercase tracking-wider mb-3">Family Members</h4>
-                {loadingFamily ? (
-                  <div className="text-center py-4 text-taupe-400 text-xs">Loading family list...</div>
-                ) : familyMembers.length === 0 ? (
-                  <div className="text-center py-5 text-taupe-400 text-xs bg-ivory-100/55 rounded-2xl border border-dashed border-gold-200/60 p-4">
-                    No other family members registered yet. Add one below!
-                  </div>
-                ) : (
-                  <div className="space-y-2.5">
-                    {familyMembers.map(member => (
-                      <div key={member.id} className="flex items-center justify-between p-3 bg-ivory-100/50 rounded-2xl border border-stone-150/40 hover:bg-ivory-200/50 transition duration-200">
-                        <div className="flex items-center gap-3">
-                          <img
-                            src={`${API_BASE}/admin/members/${member.id}/selfie?password=${localStorage.getItem('admin_password')}`}
-                            alt={member.name}
-                            className="w-10 h-10 rounded-full object-cover border border-gold-200/80 bg-white"
-                            onError={(e) => { e.target.src = '/logo.png' }}
-                          />
-                          <span className="text-sm font-semibold text-stone-850">{member.name}</span>
-                        </div>
-                        <button
-                          onClick={() => handleDeleteFamilyMember(member.id, member.name)}
-                          className="text-red-400 hover:text-red-600 text-sm p-2 hover:bg-white rounded-xl transition cursor-pointer"
-                          title="Remove family member"
-                        >
-                          🗑
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Add Family Member Form */}
-              <div className="border-t border-gold-100 pt-4">
-                <h4 className="text-xs font-bold text-taupe-500 uppercase tracking-wider mb-3">Add Family Member</h4>
-                <form onSubmit={handleAddFamilyMemberSubmit} className="space-y-4 bg-ivory-100/30 p-4 rounded-2xl border border-stone-150/55">
-                  <div>
-                    <label className="block text-[10px] font-bold text-taupe-400 uppercase tracking-wider mb-1">Member Name</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Susan Miller"
-                      value={newMemberName}
-                      onChange={(e) => setNewMemberName(e.target.value)}
-                      className="w-full px-4 py-2.5 rounded-xl border border-gold-200/60 focus:outline-none focus:border-taupe-400 text-taupe-800 text-xs font-medium"
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-bold text-taupe-400 uppercase tracking-wider mb-1">Reference Portrait (Selfie)</label>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={(e) => {
-                        const file = e.target.files[0]
-                        if (file) {
-                          setMemberSelfieFile(file)
-                          setMemberSelfiePreview(URL.createObjectURL(file))
-                        }
-                      }}
-                      className="hidden"
-                      id="member-selfie-upload"
-                    />
-                    <label
-                      htmlFor="member-selfie-upload"
-                      className="block w-full border border-dashed border-gold-200/60 hover:border-taupe-400 rounded-xl p-4 text-center cursor-pointer transition bg-white"
-                    >
-                      {memberSelfiePreview ? (
-                        <img
-                          src={memberSelfiePreview}
-                          alt="Preview"
-                          className="w-14 h-14 object-cover mx-auto rounded-full border border-gold-200/60"
-                        />
-                      ) : (
-                        <div className="text-stone-450 space-y-0.5 py-1">
-                          <p className="text-[10px] font-semibold text-taupe-600">Select Portrait Photo</p>
-                          <p className="text-[8px] text-taupe-400">Clear close-up portrait for maximum accuracy</p>
-                        </div>
-                      )}
-                    </label>
-                  </div>
-
-                  {familyMessage && (
-                    <p className="text-taupe-600 text-xs font-semibold text-center mt-1">
-                      {familyMessage}
-                    </p>
-                  )}
-
-                  <button
-                    type="submit"
-                    disabled={addingMember}
-                    className="w-full bg-taupe-800 hover:bg-taupe-800 text-white font-semibold py-2.5 rounded-xl transition duration-200 text-xs uppercase tracking-wider disabled:bg-gold-200 cursor-pointer"
-                  >
-                    {addingMember ? 'Matching & Syncing...' : 'Add Family Member'}
-                  </button>
-                </form>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
     </div>
   )
