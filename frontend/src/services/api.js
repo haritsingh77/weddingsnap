@@ -222,6 +222,14 @@ export const uploadClusterProfilePic = (clusterId, file) => {
   return api.post(`/faces/clusters/${clusterId}/upload-profile-pic`, form)
 }
 
+// Admin: set the avatar to a square the admin drew on one of the person's own
+// photos. Coordinates are fractions of the full-res image, so the crop lands the
+// same regardless of how big the photo was shown in the browser.
+export const cropClusterAvatar = (clusterId, driveId, fx, fy, fsize) =>
+  api.post(`/faces/clusters/${clusterId}/crop-avatar`, {
+    drive_id: driveId, fx, fy, fsize,
+  })
+
 export const adminGetFamilyMembers = (guestId) =>
   api.get(`/admin/guests/${guestId}/members`)
 

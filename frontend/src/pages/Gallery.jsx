@@ -30,10 +30,10 @@ import {
   mergeClusters,
   unmergeCluster,
   deleteCluster,
-  setClusterProfilePic,
   deletePhotosBatch,
   downloadPhotosBatch,
   uploadClusterProfilePic,
+  cropClusterAvatar,
   notMePhoto
 } from '../services/api'
 
@@ -377,6 +377,13 @@ export default function Gallery() {
     const [newNameInput, setNewNameInput] = useState('')
     const [showChangePhotoModal, setShowChangePhotoModal] = useState(false)
     const [clusterCacheBuster, setClusterCacheBuster] = useState(Date.now())
+    // Avatar cropping: the photo the admin picked to crop, and the square box
+    // (in the displayed image's pixels) they've dragged over the person's face.
+    const [cropPhoto, setCropPhoto] = useState(null)
+    const [cropBox, setCropBox] = useState(null)
+    const [cropSaving, setCropSaving] = useState(false)
+    const cropImgRef = useRef(null)
+    const cropDrag = useRef(null)
     const fetchingPageRef = useRef(0)
 
     // Transient toast (auto-dismisses). type: 'success' | 'error' | 'info'.
@@ -1200,20 +1207,6 @@ export default function Gallery() {
         })
     }
 
-    const handleSetProfilePic = async (driveId) => {
-        try {
-            await setClusterProfilePic(selectedCluster, driveId)
-            // Refresh clusters list so the UI updates
-            const res = await getFaceClusters()
-            setClusters(res.data)
-            setClusterCacheBuster(Date.now())
-            setShowChangePhotoModal(false)
-        } catch (err) {
-            console.error("Failed to set profile picture:", err)
-            alert("Failed to set profile picture. Please try again.")
-        }
-    }
-
     const handleManualAvatarUpload = async (e) => {
         const file = e.target.files?.[0]
         if (!file) return
@@ -1230,6 +1223,83 @@ export default function Gallery() {
         }
     }
 
+
+    // ── Avatar crop ─────────────────────────────────────────────────────────
+    // Center a square when the chosen photo loads, sized to ~55% of the shorter
+    // side so the admin only has to nudge it onto the face.
+    const onCropImgLoad = () => {
+        const img = cropImgRef.current
+        if (!img) return
+        const W = img.clientWidth, H = img.clientHeight
+        const size = Math.round(Math.min(W, H) * 0.55)
+        setCropBox({ x: Math.round((W - size) / 2), y: Math.round((H - size) / 2), size })
+    }
+
+    // Keep the square fully on the image.
+    const clampCropBox = (b) => {
+        const img = cropImgRef.current
+        if (!img) return b
+        const W = img.clientWidth, H = img.clientHeight
+        const size = Math.max(40, Math.min(b.size, W, H))
+        return {
+            x: Math.max(0, Math.min(b.x, W - size)),
+            y: Math.max(0, Math.min(b.y, H - size)),
+            size,
+        }
+    }
+
+    const startCropDrag = (e, mode) => {
+        e.preventDefault(); e.stopPropagation()
+        cropDrag.current = { mode, startX: e.clientX, startY: e.clientY, box: { ...cropBox } }
+        const move = (ev) => {
+            const d = cropDrag.current
+            if (!d) return
+            const dx = ev.clientX - d.startX, dy = ev.clientY - d.startY
+            if (d.mode === 'move') {
+                setCropBox(clampCropBox({ x: d.box.x + dx, y: d.box.y + dy, size: d.box.size }))
+            } else {
+                setCropBox(clampCropBox({ x: d.box.x, y: d.box.y, size: d.box.size + Math.max(dx, dy) }))
+            }
+        }
+        const up = () => {
+            cropDrag.current = null
+            window.removeEventListener('pointermove', move)
+            window.removeEventListener('pointerup', up)
+        }
+        window.addEventListener('pointermove', move)
+        window.addEventListener('pointerup', up)
+    }
+
+    const closeChangePhoto = () => {
+        setShowChangePhotoModal(false)
+        setCropPhoto(null)
+        setCropBox(null)
+    }
+
+    const handleCropConfirm = async () => {
+        const img = cropImgRef.current
+        if (!img || !cropBox || !cropPhoto) return
+        setCropSaving(true)
+        try {
+            // The image scales uniformly (object-contain), so fractions of the
+            // rendered box map straight onto the full-res image server-side.
+            const W = img.clientWidth, H = img.clientHeight
+            await cropClusterAvatar(
+                selectedCluster, cropPhoto,
+                cropBox.x / W, cropBox.y / H, cropBox.size / W,
+            )
+            const res = await getFaceClusters()
+            setClusters(res.data)
+            setClusterCacheBuster(Date.now())
+            closeChangePhoto()
+            showToast('Profile picture updated')
+        } catch (err) {
+            console.error('Failed to crop avatar:', err)
+            showToast('Could not update the picture', 'error')
+        } finally {
+            setCropSaving(false)
+        }
+    }
 
     const handleRenameClusterPage = async (name) => {
         if (!name.trim()) return
@@ -2626,32 +2696,40 @@ export default function Gallery() {
 
             {/* CHOOSE PROFILE PICTURE MODAL */}
             {showChangePhotoModal && (
-                <div 
+                <div
                     className="fixed inset-0 z-55 bg-taupe-900/80 backdrop-blur-sm flex items-center justify-center p-4"
-                    onClick={() => setShowChangePhotoModal(false)}
+                    onClick={closeChangePhoto}
                 >
-                    <div 
+                    <div
                         className="bg-white rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh] animate-fade-in-up"
                         onClick={(e) => e.stopPropagation()}
                     >
                         {/* Header */}
                         <div className="p-6 border-b border-gold-100 flex justify-between items-center bg-ivory-100">
                             <div>
-                                <h3 className="font-serif text-taupe-900 text-lg font-semibold">Choose Profile Picture</h3>
-                                <p className="text-taupe-400 text-xs mt-0.5">Select a photo below or upload from your device.</p>
+                                <h3 className="font-serif text-taupe-900 text-lg font-semibold">
+                                    {cropPhoto ? 'Crop the face' : 'Choose Profile Picture'}
+                                </h3>
+                                <p className="text-taupe-400 text-xs mt-0.5">
+                                    {cropPhoto
+                                        ? "Drag the square onto this person's face."
+                                        : 'Pick a photo to crop their face, or upload one.'}
+                                </p>
                             </div>
                             <div className="flex items-center gap-3">
-                                <label className="bg-taupe-800 text-white hover:bg-gold-600 transition-all text-xs font-semibold px-4 py-2.5 rounded-xl cursor-pointer shadow-sm flex items-center gap-1.5">
-                                    📤 Upload Photo
-                                    <input 
-                                        type="file" 
-                                        accept="image/*" 
-                                        className="hidden" 
-                                        onChange={handleManualAvatarUpload}
-                                    />
-                                </label>
-                                <button 
-                                    onClick={() => setShowChangePhotoModal(false)}
+                                {!cropPhoto && (
+                                    <label className="bg-taupe-800 text-white hover:bg-gold-600 transition-all text-xs font-semibold px-4 py-2.5 rounded-xl cursor-pointer shadow-sm flex items-center gap-1.5">
+                                        📤 Upload Photo
+                                        <input
+                                            type="file"
+                                            accept="image/*"
+                                            className="hidden"
+                                            onChange={handleManualAvatarUpload}
+                                        />
+                                    </label>
+                                )}
+                                <button
+                                    onClick={closeChangePhoto}
                                     className="w-8 h-8 rounded-full bg-gold-100/60 text-taupe-600 hover:bg-gold-100 flex items-center justify-center text-sm transition-all"
                                 >
                                     ✕
@@ -2660,28 +2738,73 @@ export default function Gallery() {
                         </div>
 
 
-                        {/* Photo Grid */}
-                        <div className="p-6 overflow-y-auto flex-1">
-                            {filtered.length === 0 ? (
-                                <p className="text-taupe-400 text-center text-sm py-12">No photos available.</p>
-                            ) : (
-                                <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
-                                    {filtered.filter(p => !p.is_video).map((photo, i) => (
-                                        <div 
-                                            key={i}
-                                            onClick={() => handleSetProfilePic(photo.drive_id)}
-                                            className="aspect-square relative group overflow-hidden bg-ivory-200 border border-gold-200/50 rounded-xl cursor-pointer hover:border-gold-500 hover:shadow transition-all duration-300"
+                        {cropPhoto ? (
+                            /* ── Crop view ─────────────────────────────────────── */
+                            <div className="p-6 overflow-y-auto flex-1 flex flex-col items-center gap-4">
+                                <div className="relative inline-block select-none touch-none max-w-full">
+                                    <img
+                                        ref={cropImgRef}
+                                        src={withToken(`${API_BASE}/photos/preview/${cropPhoto}`)}
+                                        alt=""
+                                        draggable={false}
+                                        onLoad={onCropImgLoad}
+                                        className="block max-h-[52vh] max-w-full rounded-xl"
+                                    />
+                                    {cropBox && (
+                                        <div
+                                            onPointerDown={(e) => startCropDrag(e, 'move')}
+                                            style={{ left: cropBox.x, top: cropBox.y, width: cropBox.size, height: cropBox.size }}
+                                            className="absolute border-2 border-white rounded-lg cursor-move shadow-[0_0_0_9999px_rgba(30,25,20,0.55)]"
                                         >
-                                            <img 
-                                                src={withToken(`${API_BASE}${photo.thumb_url}`)} 
-                                                alt=""
-                                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-550"
+                                            {/* Resize handle, bottom-right corner */}
+                                            <div
+                                                onPointerDown={(e) => startCropDrag(e, 'resize')}
+                                                className="absolute -right-2.5 -bottom-2.5 w-5 h-5 bg-white border-2 border-gold-500 rounded-full cursor-se-resize shadow"
                                             />
                                         </div>
-                                    ))}
+                                    )}
                                 </div>
-                            )}
-                        </div>
+                                <div className="flex items-center gap-3">
+                                    <button
+                                        onClick={() => { setCropPhoto(null); setCropBox(null) }}
+                                        disabled={cropSaving}
+                                        className="text-xs font-semibold px-5 py-2.5 rounded-xl border border-gold-200 text-taupe-600 hover:bg-ivory-100 transition-all disabled:opacity-50"
+                                    >
+                                        ← Back
+                                    </button>
+                                    <button
+                                        onClick={handleCropConfirm}
+                                        disabled={cropSaving || !cropBox}
+                                        className="bg-taupe-800 text-white hover:bg-gold-600 transition-all text-xs font-semibold px-5 py-2.5 rounded-xl shadow-sm disabled:opacity-50 flex items-center gap-1.5"
+                                    >
+                                        {cropSaving ? 'Saving…' : '✓ Use this crop'}
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            /* ── Photo grid ────────────────────────────────────── */
+                            <div className="p-6 overflow-y-auto flex-1">
+                                {filtered.length === 0 ? (
+                                    <p className="text-taupe-400 text-center text-sm py-12">No photos available.</p>
+                                ) : (
+                                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
+                                        {filtered.filter(p => !p.is_video).map((photo, i) => (
+                                            <div
+                                                key={i}
+                                                onClick={() => { setCropPhoto(photo.drive_id); setCropBox(null) }}
+                                                className="aspect-square relative group overflow-hidden bg-ivory-200 border border-gold-200/50 rounded-xl cursor-pointer hover:border-gold-500 hover:shadow transition-all duration-300"
+                                            >
+                                                <img
+                                                    src={withToken(`${API_BASE}${photo.thumb_url}`)}
+                                                    alt=""
+                                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-550"
+                                                />
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 </div>
             )}

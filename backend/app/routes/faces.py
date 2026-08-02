@@ -368,6 +368,15 @@ class SetProfilePicRequest(BaseModel):
     drive_id: str
 
 
+class CropAvatarRequest(BaseModel):
+    """A face crop the admin drew on one of the person's photos, in fractions of
+    the full-res image (so it's independent of the display size in the browser)."""
+    drive_id: str
+    fx: float     # left edge, fraction of width [0..1]
+    fy: float     # top edge, fraction of height [0..1]
+    fsize: float  # square side, fraction of width [0..1]
+
+
 _PEOPLE_TAB_CACHE = "people_tab.json"
 _PEOPLE_TAB_TTL = 3600  # seconds. Long, because rebuilding from the faces table
 # is ~20s and the People tab showed empty during it on a cold instance. Any
@@ -1177,4 +1186,54 @@ async def upload_cluster_profile_pic(cluster_id: str, file: UploadFile = File(..
     except Exception as e:
         log.error(f"Failed to upload custom profile picture: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to upload profile picture: {e}")
+
+
+@router.post("/clusters/{cluster_id}/crop-avatar", dependencies=[Depends(require_admin)])
+def crop_cluster_avatar(cluster_id: str, body: CropAvatarRequest):
+    """Set the avatar to an admin-drawn crop of one of the person's own photos.
+
+    The admin picks a photo from the person's moments and drags a square over the
+    right face — useful when a photo has several people and the automatic
+    representative crop grabbed the wrong one. Stored exactly like an uploaded
+    avatar (custom_avatar_{id}.jpg + is_custom_upload), so the thumbnail and guest
+    selfie endpoints already serve it."""
+    try:
+        from app.services.drive_cache import save_cached_file, get_cached_json, save_cached_json
+        from app.services.drive_service import download_file_to_memory
+        from PIL import Image, ImageOps
+        import io
+
+        data = download_file_to_memory(body.drive_id)
+        if not data:
+            raise HTTPException(status_code=404, detail="Photo not found in Google Drive")
+
+        img = ImageOps.exif_transpose(Image.open(io.BytesIO(data)).convert("RGB"))
+        w, h = img.size
+
+        # Fractions → full-res pixels, then clamp so the square stays on the image.
+        side = int(max(0.02, min(body.fsize, 1.0)) * w)
+        side = max(10, min(side, w, h))
+        left = max(0, min(int(body.fx * w), w - side))
+        top = max(0, min(int(body.fy * h), h - side))
+
+        crop = img.crop((left, top, left + side, top + side)).resize(
+            (400, 400), Image.Resampling.LANCZOS
+        )
+        buf = io.BytesIO()
+        crop.save(buf, format="JPEG", quality=90)
+
+        avatar_filename = f"custom_avatar_{cluster_id}.jpg"
+        save_cached_file(avatar_filename, buf.getvalue(), mime_type="image/jpeg")
+
+        reps_data = get_cached_json("cluster_representatives.json") or {}
+        reps_data[cluster_id] = {"is_custom_upload": True, "avatar_path": avatar_filename}
+        save_cached_json("cluster_representatives.json", reps_data)
+        _bust_people_tab_cache()
+
+        return {"success": True, "avatar_url": f"/faces/clusters/{cluster_id}/thumbnail"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Failed to crop custom avatar: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to set avatar: {e}")
 
